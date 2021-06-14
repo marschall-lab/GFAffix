@@ -6,7 +6,7 @@
 git clone https://github.com/danydoerr/GFAffix.git
 cargo build --manifest-path GFAffix/Cargo.toml --release
 
-$ ./target/release/gfaffix --help
+$ ./GFAffix/target/release/gfaffix --help
 gfaffix 0.1
 Daniel Doerr <daniel.doerr@hhu.de>
 Identify shared suffixes/prefixes in branchings
