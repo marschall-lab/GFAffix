@@ -260,29 +260,36 @@ fn find_shared_affixes(
     let mut visited: FxHashSet<Handle> = FxHashSet::default();
 
     let oriented_nodes = graph.handles();
-    for start in oriented_nodes {
+    for mut start in oriented_nodes {
         if usize::from(start.id()) < 1228465 || usize::from(start.id()) > 1228483 {
             continue
         }
-        log::debug!(
-            "processing oriented node {}{}",
-            if start.is_reverse() { '<' } else { '>' },
-            usize::from(start.id())
-        );
 
-        // process each multifurcation only once
-        if !visited.contains(&start) {
-            let shared_affix_dag = build_shared_affix_dag(graph, start, direction, &mut visited)?;
-            if usize::from(start.id()) > 1228465 && usize::from(start.id()) < 1228483 {
-                log::debug!("affix tree {:?}", shared_affix_dag);
-            }
-            res.extend(enumerate_shared_affix_subg(&shared_affix_dag, &graph)?);
-        } else {
+        for _ in 0..2 {
             log::debug!(
-                "skipping oriented visited node {}{}",
+                "processing oriented node {}{}",
                 if start.is_reverse() { '<' } else { '>' },
                 usize::from(start.id())
             );
+
+            // process node in forward direction
+            // make sure each multifurcation is tested only once
+            if !visited.contains(&start) {
+                let shared_affix_dag = build_shared_affix_dag(graph, start, direction, &mut visited)?;
+                if usize::from(start.id()) > 1228465 && usize::from(start.id()) < 1228483 {
+                    log::debug!("affix tree {:?}", shared_affix_dag);
+                }
+                res.extend(enumerate_shared_affix_subg(&shared_affix_dag, &graph)?);
+            } else {
+                log::debug!(
+                    "skipping oriented visited node {}{}",
+                    if start.is_reverse() { '<' } else { '>' },
+                    usize::from(start.id())
+                );
+            }
+
+            // process node in next iteration in reverse direction
+            start = start.flip();
         }
     }
 
