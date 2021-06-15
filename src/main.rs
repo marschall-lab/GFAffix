@@ -259,7 +259,7 @@ fn find_shared_affixes(
 
     let oriented_nodes = graph.handles();
     for start in oriented_nodes {
-        if usize::from(start.id()) < 1228465 && usize::from(start.id()) > 1228483 {
+        if usize::from(start.id()) < 1228465 || usize::from(start.id()) > 1228483 {
             continue
         }
         log::debug!(
