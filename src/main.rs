@@ -134,6 +134,10 @@ fn build_shared_affix_dag(
                 // allow for one more character to be processed if c is a coalescing node
                 if c.positions.len() > 1 || c.is_coalescing {
                     res.push(c);
+                } else if c.positions.len() == 1 {
+                    // we haven't actually "visited" the node, so let's remove it from the visited
+                    // list
+                    visiting.remove(&c.positions[0].0);
                 }
             }
         }
@@ -152,6 +156,7 @@ fn build_shared_affix_dag(
     visited.extend(visiting);
     Ok(res)
 }
+
 
 fn enumerate_shared_affix_subg(
     shared_affix_dag: &Vec<SharedChar>,
@@ -263,6 +268,9 @@ fn find_shared_affixes(
         // process each multifurcation only once
         if !visited.contains(&start) {
             let shared_affix_dag = build_shared_affix_dag(graph, start, direction, &mut visited)?;
+            if usize::from(start.id()) > 1228465 &&  usize::from(start.id()) < 1228465 {
+                log::debug!("{:?}", shared_affix_dag);
+            }
             res.extend(enumerate_shared_affix_subg(&shared_affix_dag, &graph)?);
         }
     }
