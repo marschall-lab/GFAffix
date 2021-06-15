@@ -168,12 +168,13 @@ fn enumerate_shared_affix_subg(
     let child_count = get_child_count(&shared_affix_dag);
 
     // identify branchings of shared sequences
+    // do not report coalescing paths (unless they cannot be further extended)
     let mut is_branching = vec![false; shared_affix_dag.len()];
     // ignore root
     for i in 1..is_branching.len() {
         if let Some(j) = shared_affix_dag[i].parent {
             is_branching[j] =
-                shared_affix_dag[i].positions.len() < shared_affix_dag[j].positions.len()
+                shared_affix_dag[i].positions.len() < shared_affix_dag[j].positions.len() && !shared_affix_dag[i].is_coalescing
         }
     }
 
