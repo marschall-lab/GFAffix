@@ -171,6 +171,8 @@ fn enumerate_shared_affix_subg(
     // identify leaves of the DAG
     let child_count = get_child_count(&shared_affix_dag);
 
+    log::debug!("child count: {:?}", child_count);
+
     // identify branchings of shared sequences
     // do not report coalescing paths (unless they cannot be further extended)
     let mut is_branching = vec![false; shared_affix_dag.len()];
