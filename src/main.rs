@@ -96,7 +96,14 @@ fn build_shared_affix_dag(
     let mut visiting: FxHashSet<Handle> = FxHashSet::default();
     // create "root", corresponding to the character just before the multifurcation
     let mut root = SharedChar::new(None);
-    root.safe_push(&graph, start, graph.sequence_vec(start).len() - 1)?;
+    root.safe_push(
+        &graph,
+        start,
+        match direction {
+            Direction::Right => graph.sequence_vec(start).len() - 1,
+            Direction::Left => 0,
+        },
+    )?;
     res.push(root);
     let mut i = 0;
     while i < res.len() && i < MAX_EXTENSION {
@@ -262,7 +269,7 @@ fn find_shared_affixes(
     let oriented_nodes = graph.handles();
     for mut start in oriented_nodes {
         if usize::from(start.id()) < 1228465 || usize::from(start.id()) > 1228483 {
-            continue
+            continue;
         }
 
         for _ in 0..2 {
@@ -275,7 +282,8 @@ fn find_shared_affixes(
             // process node in forward direction
             // make sure each multifurcation is tested only once
             if !visited.contains(&start) {
-                let shared_affix_dag = build_shared_affix_dag(graph, start, direction, &mut visited)?;
+                let shared_affix_dag =
+                    build_shared_affix_dag(graph, start, direction, &mut visited)?;
                 if usize::from(start.id()) > 1228465 && usize::from(start.id()) < 1228483 {
                     log::debug!("affix tree {:?}", shared_affix_dag);
                 }
