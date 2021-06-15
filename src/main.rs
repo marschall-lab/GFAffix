@@ -268,7 +268,7 @@ fn find_shared_affixes(
         // process each multifurcation only once
         if !visited.contains(&start) {
             let shared_affix_dag = build_shared_affix_dag(graph, start, direction, &mut visited)?;
-            if usize::from(start.id()) > 1228465 && usize::from(start.id()) < 1228465 {
+            if usize::from(start.id()) > 1228465 && usize::from(start.id()) < 1228483 {
                 log::debug!("affix tree {:?}", shared_affix_dag);
             }
             res.extend(enumerate_shared_affix_subg(&shared_affix_dag, &graph)?);
