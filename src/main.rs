@@ -268,10 +268,6 @@ fn find_shared_affixes(
 
     let oriented_nodes = graph.handles();
     for mut start in oriented_nodes {
-        if usize::from(start.id()) < 1228465 || usize::from(start.id()) > 1228483 {
-            continue;
-        }
-
         for _ in 0..2 {
             log::debug!(
                 "processing oriented node {}{}",
@@ -284,9 +280,6 @@ fn find_shared_affixes(
             if !visited.contains(&start) {
                 let shared_affix_dag =
                     build_shared_affix_dag(graph, start, direction, &mut visited)?;
-                if usize::from(start.id()) > 1228465 && usize::from(start.id()) < 1228483 {
-                    log::debug!("affix tree {:?}", shared_affix_dag);
-                }
                 res.extend(enumerate_shared_affix_subg(&shared_affix_dag, &graph)?);
             } else {
                 log::debug!(
@@ -364,7 +357,8 @@ fn main() -> Result<(), io::Error> {
             "oriented_start_node",
             "startpos",
             "oriented_end_nodes",
-            "shared_sequence"
+            "shared_sequence",
+            "affix_type"
         ]
         .join("\t")
     )?;
@@ -375,7 +369,7 @@ fn main() -> Result<(), io::Error> {
     if let Ok(suffixes) = find_shared_affixes(&graph, Direction::Left) {
         print(suffixes, &"suffix", &mut out)?;
     }
-
+    out.flush()?;
     log::info!("done");
     Ok(())
 }
