@@ -306,6 +306,7 @@ fn find_shared_affixes(
 
 fn print<W: io::Write>(
     affixes: Vec<AffixSubgraph>,
+    affix_type: &str,
     out: &mut io::BufWriter<W>,
 ) -> Result<(), io::Error> {
     for ics in affixes.iter() {
@@ -323,7 +324,7 @@ fn print<W: io::Write>(
         }
         writeln!(
             out,
-            "{}{}\t{}\t{}\t{}",
+            "{}{}\t{}\t{}\t{}\t{}",
             match ics.start.1 {
                 Direction::Right => '>',
                 Direction::Left => '<',
@@ -331,7 +332,8 @@ fn print<W: io::Write>(
             &ics.start.0,
             &ics.start.2,
             ends.join(","),
-            &ics.sequence
+            &ics.sequence,
+            affix_type
         )?;
     }
     Ok(())
@@ -367,11 +369,11 @@ fn main() -> Result<(), io::Error> {
         .join("\t")
     )?;
     if let Ok(prefixes) = find_shared_affixes(&graph, Direction::Right) {
-        print(prefixes, &mut out)?;
+        print(prefixes, &"prefix", &mut out)?;
     }
     log::info!("testing suffixes");
     if let Ok(suffixes) = find_shared_affixes(&graph, Direction::Left) {
-        print(suffixes, &mut out)?;
+        print(suffixes, &"suffix", &mut out)?;
     }
 
     log::info!("done");
