@@ -157,7 +157,6 @@ fn build_shared_affix_dag(
     Ok(res)
 }
 
-
 fn enumerate_shared_affix_subg(
     shared_affix_dag: &Vec<SharedChar>,
     graph: &HashGraph,
@@ -178,8 +177,9 @@ fn enumerate_shared_affix_subg(
     // ignore root
     for i in 1..is_branching.len() {
         if let Some(j) = shared_affix_dag[i].parent {
-            is_branching[j] =
-                shared_affix_dag[i].positions.len() < shared_affix_dag[j].positions.len() && !shared_affix_dag[i].is_coalescing
+            is_branching[j] = shared_affix_dag[i].positions.len()
+                < shared_affix_dag[j].positions.len()
+                && !shared_affix_dag[i].is_coalescing
         }
     }
 
@@ -268,10 +268,16 @@ fn find_shared_affixes(
         // process each multifurcation only once
         if !visited.contains(&start) {
             let shared_affix_dag = build_shared_affix_dag(graph, start, direction, &mut visited)?;
-            if usize::from(start.id()) > 1228465 &&  usize::from(start.id()) < 1228465 {
-                log::debug!("{:?}", shared_affix_dag);
+            if usize::from(start.id()) > 1228465 && usize::from(start.id()) < 1228465 {
+                log::debug!("affix tree {:?}", shared_affix_dag);
             }
             res.extend(enumerate_shared_affix_subg(&shared_affix_dag, &graph)?);
+        } else {
+            log::debug!(
+                "skipping oriented visited node {}{}",
+                if start.is_reverse() { '<' } else { '>' },
+                usize::from(start.id())
+            );
         }
     }
 
