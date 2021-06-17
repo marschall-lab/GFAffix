@@ -88,7 +88,6 @@ impl PartialEq for SharedChar {
 fn build_shared_affix_dag(
     graph: &HashGraph,
     start: Handle,
-    direction: Direction,
     visited: &mut FxHashSet<Handle>,
 ) -> Result<Vec<SharedChar>, Box<dyn Error>> {
     let mut res: Vec<SharedChar> = Vec::new();
@@ -99,10 +98,7 @@ fn build_shared_affix_dag(
     root.safe_push(
         &graph,
         start,
-        match direction {
-            Direction::Right => graph.sequence_vec(start).len() - 1,
-            Direction::Left => 0,
-        },
+        graph.sequence_vec(start).len() - 1,
     )?;
     res.push(root);
     let mut i = 0;
@@ -119,8 +115,8 @@ fn build_shared_affix_dag(
                 c.safe_push(&graph, *v, p + 1)?;
                 all_visited = false;
             } else {
-                // traverse multifurcation
-                for u in graph.neighbors(*v, direction) {
+                // traverse multifurcation in the forward direction of the handle
+                for u in graph.neighbors(*v, Direction::Right) {
                     all_visited &= !visiting.insert(u);
                     let seq = graph.sequence_vec(u);
                     let c = branch.entry(seq[0]).or_insert(SharedChar::new(Some(i)));
@@ -258,12 +254,8 @@ fn get_child_count(shared_affix_dag: &Vec<SharedChar>) -> Vec<usize> {
     res
 }
 
-fn find_shared_affixes(
-    graph: &HashGraph,
-    direction: Direction,
-) -> Result<Vec<AffixSubgraph>, Box<dyn Error>> {
-    let mut res = Vec::new();
-
+fn find_and_report_shared_affixes<W: Write>(graph: &HashGraph, out: &mut io::BufWriter<W>) -> Result<(), Box<dyn Error>> {
+    
     let mut visited: FxHashSet<Handle> = FxHashSet::default();
 
     let oriented_nodes = graph.handles();
@@ -279,8 +271,11 @@ fn find_shared_affixes(
             // make sure each multifurcation is tested only once
             if !visited.contains(&start) {
                 let shared_affix_dag =
-                    build_shared_affix_dag(graph, start, direction, &mut visited)?;
-                res.extend(enumerate_shared_affix_subg(&shared_affix_dag, &graph)?);
+                    build_shared_affix_dag(graph, start, &mut visited)?;
+                let affixes = enumerate_shared_affix_subg(&shared_affix_dag, &graph)?;
+                for affix in affixes.iter() {
+                    print(affix, out)?;
+                }
             } else {
                 log::debug!(
                     "skipping oriented visited node {}{}",
@@ -294,41 +289,37 @@ fn find_shared_affixes(
         }
     }
 
-    Ok(res)
+    Ok(())
 }
 
 fn print<W: io::Write>(
-    affixes: Vec<AffixSubgraph>,
-    affix_type: &str,
+    affix: &AffixSubgraph,
     out: &mut io::BufWriter<W>,
 ) -> Result<(), io::Error> {
-    for ics in affixes.iter() {
-        let mut ends = Vec::new();
-        for (v, direction, position) in ics.ends.iter() {
-            ends.push(format!(
-                "{}{}:{}",
-                match direction {
-                    Direction::Right => '>',
-                    Direction::Left => '<',
-                },
-                v,
-                position
-            ));
-        }
-        writeln!(
-            out,
-            "{}{}\t{}\t{}\t{}\t{}",
-            match ics.start.1 {
+    let mut ends = Vec::new();
+    for (v, direction, position) in affix.ends.iter() {
+        ends.push(format!(
+            "{}{}:{}",
+            match direction {
                 Direction::Right => '>',
                 Direction::Left => '<',
             },
-            &ics.start.0,
-            &ics.start.2,
-            ends.join(","),
-            &ics.sequence,
-            affix_type
-        )?;
+            v,
+            position
+        ));
     }
+    writeln!(
+        out,
+        "{}{}\t{}\t{}\t{}",
+        match affix.start.1 {
+            Direction::Right => '>',
+            Direction::Left => '<',
+        },
+        &affix.start.0,
+        &affix.start.2,
+        ends.join(","),
+        &affix.sequence,
+    )?;
     Ok(())
 }
 
@@ -349,7 +340,6 @@ fn main() -> Result<(), io::Error> {
     let graph = HashGraph::from_gfa(&gfa);
 
     log::info!("identifying bubbles that multifurcate despite having identical sequences");
-    log::info!("testing prefixes");
     writeln!(
         out,
         "{}",
@@ -358,16 +348,11 @@ fn main() -> Result<(), io::Error> {
             "startpos",
             "oriented_end_nodes",
             "shared_sequence",
-            "affix_type"
         ]
         .join("\t")
     )?;
-    if let Ok(prefixes) = find_shared_affixes(&graph, Direction::Right) {
-        print(prefixes, &"prefix", &mut out)?;
-    }
-    log::info!("testing suffixes");
-    if let Ok(suffixes) = find_shared_affixes(&graph, Direction::Left) {
-        print(suffixes, &"suffix", &mut out)?;
+    if let Err(e) = find_and_report_shared_affixes(&graph, &mut out) {
+        panic!("gfaffix failed: {}", e);
     }
     out.flush()?;
     log::info!("done");
