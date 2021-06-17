@@ -142,7 +142,7 @@ fn main() -> Result<(), io::Error> {
     log::info!("constructing handle graph");
     let graph = HashGraph::from_gfa(&gfa);
 
-    log::info!("identifying bubbles that multifurcate despite having identical sequences");
+    log::info!("identifying variant-preserving shared prefixes");
     writeln!(
         out,
         "{}",
