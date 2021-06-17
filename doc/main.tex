@@ -1,0 +1,100 @@
+\documentclass[a4paper]{article}
+
+\usepackage{algorithm}
+\usepackage{algorithmic}
+\usepackage{booktabs}
+\usepackage{amsmath}
+\usepackage{amsthm}
+\usepackage{amssymb}
+
+\title{Variant-preserving shared prefixes}
+\author{Daniel Doerr}
+
+\newtheorem{proposition}{Proposition}
+\newtheorem{conjecture}{Conjecture}
+
+\newcommand{\prefix}{\mathbf{p}}
+\newcommand{\suffix}{\mathbf{s}}
+\newcommand{\orient}{\mathbf{o}}
+\newcommand{\parent}{\mathbf{a}}
+\newcommand{\child}{\mathbf{c}}
+\newcommand{\seq}{\mathbf{t}}
+\begin{document}
+
+\maketitle
+
+Let $G = (V, E)$ be a variant graph with node set $V$ representing the set of
+\emph{oriented} nodes of $G$. Each node $v \in V$ is associated with a sequence
+$\seq(v)$ representing a DNA molecule. For any given sequence $v \in V$ there exists
+a unique node $\bar v \in V$ with $\seq(\bar v)$ corresponding to the 
+reverse complementary sequence of $\seq(v)$. We further assume that $G$  has a
+\emph{source} node $s$ and a \emph{sink} node \emph{S} $s, S \in V$, such that
+for any $v \in V$ there exists a path $(s,\ldots, v, \ldots S)$. Then the
+\emph{variants} $\mathcal V_G$ of graph $G$ is the set of all possible sequences
+$\seq(s).\seq(v_0)\ldots\seq(v_k).\seq(S)$ such that $(s, v_0, \ldots, v_S)$ is
+a path in $G$. 
+
+Further, $\prefix(\seq(u), \seq(v))$ denotes the longest common prefix of
+sequences $\seq(v)$ and $\seq(u)$. Further, we denote by $\parent(v) := \{u
+\mid \{\bar v, u\} \in E\}$ the \emph{parents} of $v$ and by $\child(v) := \{u
+\mid \{v, u\} \in E\}$ the \emph{children} of $v$. A triple $(u, v, w)$ with $u
+\neq w$ and $\{v, w\} \subseteq\child(u)$ is a \emph{cherry}. 
+
+\begin{proposition}
+    Let $(u, v, w)$ be a cherry with $|\prefix(\seq(u), \seq(v))| > 0$. Let $G' =
+    (V', E')$ be a graph with 
+    \[
+        V' = V \setminus \{v, \bar v, w, \bar w\} \cup \{x, \bar x, v', \bar
+        v', w', \bar w'\}
+    \]
+    and 
+    \begin{align*}
+        E' = & E \setminus (\{\{v, y\} \mid y \in V\} \cup \{w, z\} \mid z \in
+        V\}) \\
+        & \cup \{\{x, p\} \mid p \in \parent(v) \cup \parent(w)\} \cup
+        \{\{\bar x, \bar p \} \mid \bar p \in \parent(\bar v) \cup \parent(\bar
+        w) \} \\
+        & \cup \{\{x, v'\}, \{x, w'\}, \{\bar x, \bar v'\}, \{\bar x, \bar
+        w'\}\} \\
+        & \cup \{\{v', c\} \mid c \in \child(v) \} \cup \{\{w', c\} \mid c \in
+        \child(w)\}\,,
+    \end{align*}
+    where $\seq(x) = \prefix(\seq(u), \seq(v))$, and $\seq(v'), \seq(w')$ the
+    sequences of $v$ and $w$ without $\prefix(\seq(u), \seq(v))$. 
+    Then $\mathcal V_G = \mathcal V_{G'}$ holds true in general if and only if
+    $\parent(v) = \parent(w)$.
+\end{proposition}
+
+\begin{proof}
+    \begin{enumerate}
+        \item[$\Rightarrow$] Let $\mathcal V_v := 
+            \{\seq(s)\ldots\seq(p).\seq(v).\seq(c)\ldots\seq(S) \mid p \in
+            \parent(v), c \in \child(v) \} \subseteq \mathcal V_{G}$ and 
+            $V_{v'} :=
+            \{\seq(s)\ldots\seq(p).\seq(x).\seq(v').\seq(c)\ldots\seq(S)) \mid
+            p \in \parent(x), c \in \child(v') \}\subseteq \mathcal V_{G'}$.
+            By construction, we have $\parent(x) = \parent(v)$ and $\child(v')
+            = \child(v)$ and $\seq(v) = \seq(x).\seq(v')$, therefore $V_{v'} =
+            \{\seq(s)\ldots\seq(p).\seq(v).\seq(c)\ldots\seq(S)) \mid p \in
+            \parent(v), c \in \child(v) \} = \mathcal V_v$. The same logic,
+            applied to all other new variants of $\mathcal V_{G'}$, completes
+            the proof. 
+
+    \item[$\Leftarrow$] Assume $\mathcal V_G = \mathcal V_{G'}$ and $\parent(v)
+        \subset \parent(w)$. Consider some path of graph $G$ of the form $(s,
+        \ldots, p)$, $p \in \parent(w) \setminus \parent(v)$, s.t.
+        $\seq(s)\ldots\seq(p) \not\in \{\seq(s)\ldots\seq(p') \mid p' \in
+        \parent(v)\}$. Then the set of sequences
+        $\{\seq(s)\ldots\seq(p).\seq(x).\seq(v').\seq(c)\ldots\seq(S) \mid c
+        \in \child(v)\}$ is a subset of $\mathcal V_{G'}$, but not of $\mathcal
+        V_{G}$. 
+    \end{enumerate}
+\end{proof}
+
+%\begin{conjecture} 
+%    Let $G$ be a variant graph s.t. there exists no cherry $(u, v, w)$ be a
+%    cherry with $|\prefix(u, v)| > 0$ with $\parent(u) = \parent(v)$. Then
+%    there exists no two paths $p = (s, \ldots, S)$ and $p' = (s, \ldots, S)$
+%    with $p \neq p'$ and 
+%\end{conecture}
+\end{document}
