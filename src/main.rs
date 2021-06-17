@@ -1,6 +1,5 @@
 /* standard use */
 use rustc_hash::FxHashMap;
-use rustc_hash::FxHashSet;
 use std::error::Error;
 use std::io;
 use std::io::prelude::*;
@@ -14,8 +13,6 @@ use handlegraph::{
     hashgraph::HashGraph,
 };
 
-// fail-safe for complex circular structures
-const MAX_EXTENSION: usize = 10_000;
 
 #[derive(clap::Clap, Debug)]
 #[clap(
@@ -31,261 +28,78 @@ pub struct Command {
 // structure for storing reported subgraph
 pub struct AffixSubgraph {
     pub sequence: String,
-    pub start: (usize, Direction, usize),
-    pub ends: Vec<(usize, Direction, usize)>,
+    pub start: Handle,
+    pub ends: Vec<Handle>,
 }
 
-// structure storing a shared character
-#[derive(Debug, Clone, Hash, Eq)]
-pub struct SharedChar {
-    pub parent: Option<usize>,
-    pub positions: Vec<(Handle, usize)>,
-    pub is_coalescing: bool,
-}
 
-impl SharedChar {
-    fn safe_push(
-        &mut self,
-        graph: &HashGraph,
-        v: Handle,
-        position: usize,
-    ) -> Result<(), Box<dyn Error>> {
-        // check whether character matches the existing ones
-        if !self.positions.is_empty() {
-            if self.positions.contains(&(v, position)) {
-                self.is_coalescing = true;
-                return Ok(());
-            }
-            let (u, p) = self.positions.iter().next().unwrap();
-            if graph.sequence_vec(*u)[*p] != graph.sequence_vec(v)[position] {
-                panic!(
-                    "character {} does not match {} of shared character",
-                    graph.sequence_vec(v)[position] as char,
-                    graph.sequence_vec(*u)[*p] as char
-                )
-            }
-        }
-        log::debug!("safely appending {:?}:{} to shared character", v, position);
-        self.positions.push((v, position));
-        Ok(())
-    }
-
-    fn new(parent: Option<usize>) -> SharedChar {
-        SharedChar {
-            parent: parent,
-            positions: Vec::new(),
-            is_coalescing: false,
-        }
-    }
-}
-
-impl PartialEq for SharedChar {
-    fn eq(&self, other: &Self) -> bool {
-        self.positions == other.positions
-    }
-}
-
-fn build_variant_preserving_shared_affix_dag(
+fn enumerate_variant_preserving_shared_affixes(
     graph: &HashGraph,
-    start: Handle,
-    visited: &mut FxHashSet<Handle>,
-) -> Result<Vec<SharedChar>, Box<dyn Error>> {
-    let mut res: Vec<SharedChar> = Vec::new();
-
-    let mut visiting: FxHashSet<Handle> = FxHashSet::default();
-    // create "root", corresponding to the character just before the multifurcation
-    let mut root = SharedChar::new(None);
-    root.safe_push(
-        &graph,
-        start,
-        graph.sequence_vec(start).len() - 1,
-    )?;
-    res.push(root);
-    let mut i = 0;
-    while i < res.len() && i < MAX_EXTENSION {
-        let el = &res[i];
-        let mut branch: FxHashMap<u8, SharedChar> = FxHashMap::default();
-        let mut all_visited = true;
-        for (v, p) in el.positions.iter() {
-            // extend shared sequence
-            if p + 1 < graph.sequence_vec(*v).len() {
-                // traverse within node
-                let seq = graph.sequence_vec(*v);
-                let c = branch.entry(seq[p + 1]).or_insert(SharedChar::new(Some(i)));
-                c.safe_push(&graph, *v, p + 1)?;
-                all_visited = false;
-            } else {
-                // traverse multifurcation in the forward direction of the handle
-                for u in graph.neighbors(*v, Direction::Right) {
-                    all_visited &= !visiting.insert(u);
-                    let seq = graph.sequence_vec(u);
-                    let c = branch.entry(seq[0]).or_insert(SharedChar::new(Some(i)));
-                    c.safe_push(&graph, u, 0)?;
-                }
-            }
-        }
-
-        if all_visited {
-            log::debug!(
-                "stopping cyclic traversal that started in {}{}:{}",
-                if start.is_reverse() { '<' } else { '>' },
-                usize::from(start.id()),
-                graph.sequence_vec(start).len() - 1
-            );
-        } else {
-            for (_, c) in branch.drain() {
-                // allow for one more character to be processed if c is a coalescing node
-                if c.positions.len() > 1 || c.is_coalescing {
-                    res.push(c);
-                } else if c.positions.len() == 1 {
-                    // we haven't actually "visited" the node, so let's remove it from the visited
-                    // list
-                    visiting.remove(&c.positions[0].0);
-                }
-            }
-        }
-        i += 1;
-    }
-    if i >= MAX_EXTENSION {
-        log::error!(
-            "stopped after {} extensions from {}{}:{} to prevent cyclic traversal",
-            MAX_EXTENSION,
-            if start.is_reverse() { '<' } else { '>' },
-            usize::from(start.id()),
-            graph.sequence_vec(start).len() - 1
-        )
-    }
-    // update visited handles
-    visited.extend(visiting);
-    Ok(res)
-}
-
-fn enumerate_shared_affix_subg(
-    shared_affix_dag: &Vec<SharedChar>,
-    graph: &HashGraph,
+    v: Handle,
 ) -> Result<Vec<AffixSubgraph>, Box<dyn Error>> {
-    // bottom-up processing of shared sequence dag
     let mut res: Vec<AffixSubgraph> = Vec::new();
 
-    // don't continue if graph contains only root node
-    if shared_affix_dag.len() <= 1 {
-        return Ok(res);
+    let mut branch: FxHashMap<(u8, Vec<Handle>), Vec<Handle>> = FxHashMap::default();
+    // traverse multifurcation in the forward direction of the handle
+    for u in graph.neighbors(v, Direction::Right) {
+        let seq = graph.sequence_vec(u);
+
+        // get parents of u
+        let mut parents : Vec<Handle> = graph.neighbors(u, Direction::Left).collect();
+        parents.sort();
+        // insert child in variant-preserving data structure
+        branch.entry((seq[0], parents)).or_insert(Vec::new()).push(u);
     }
-    // identify leaves of the DAG
-    let child_count = get_child_count(&shared_affix_dag);
 
-    log::debug!("child count: {:?}", child_count);
-
-    // identify branchings of shared sequences
-    // do not report coalescing paths (unless they cannot be further extended)
-    let mut is_branching = vec![false; shared_affix_dag.len()];
-    // ignore root
-    for i in 1..is_branching.len() {
-        if let Some(j) = shared_affix_dag[i].parent {
-            is_branching[j] = shared_affix_dag[i].positions.len()
-                < shared_affix_dag[j].positions.len()
-                && !shared_affix_dag[i].is_coalescing
+    for children in branch.values() {
+        if children.len() > 1 {
+            res.push(AffixSubgraph { sequence : get_shared_prefix(children, graph)?, start : v, ends : children.clone()});
         }
     }
-
-    // root is by definition the first character in shared_affix_dag
-    let root = shared_affix_dag[0].positions[0];
-    let start = (
-        usize::from(root.0.id()),
-        if root.0.is_reverse() {
-            Direction::Left
-        } else {
-            Direction::Right
-        },
-        root.1,
-    );
-
-    for (i, c) in child_count.iter().enumerate() {
-        if *c == 0 || is_branching[i] {
-            let mut ends: Vec<(usize, Direction, usize)> = Vec::new();
-            for (v, p) in &shared_affix_dag[i].positions {
-                ends.push((
-                    usize::from(v.id()),
-                    if v.is_reverse() {
-                        Direction::Left
-                    } else {
-                        Direction::Right
-                    },
-                    *p,
-                ));
-            }
-            let sequence = get_sequence(shared_affix_dag, graph, i)?;
-            res.push(AffixSubgraph {
-                sequence,
-                start,
-                ends,
-            });
-        }
-    }
-
+     
     Ok(res)
 }
 
-fn get_sequence(
-    shared_affix_dag: &Vec<SharedChar>,
-    graph: &HashGraph,
-    end: usize,
-) -> Result<String, std::string::FromUtf8Error> {
+
+fn get_shared_prefix(nodes: &Vec<Handle>, graph: &HashGraph) -> Result<String, std::string::FromUtf8Error> {
     let mut seq: Vec<u8> = Vec::new();
-    let mut p = &shared_affix_dag[end];
-    seq.push(graph.sequence_vec(p.positions[0].0)[p.positions[0].1]);
-    while let Some(i) = p.parent {
-        p = &shared_affix_dag[i];
-        seq.push(graph.sequence_vec(p.positions[0].0)[p.positions[0].1]);
+    
+    let sequences : Vec<Vec<u8>> = nodes.iter().map(|v| graph.sequence_vec(*v)).collect();
+
+    let mut i = 0;
+    while sequences[0].len() > i {
+        let c : u8 = sequences[0][i];
+        if sequences.iter().any(|other| other.len() <= i || other[i] != c) {
+            break
+        }
+        seq.push(c);
+        i += 1;
     }
 
-    seq.reverse();
     String::from_utf8(seq)
 }
 
-fn get_child_count(shared_affix_dag: &Vec<SharedChar>) -> Vec<usize> {
-    let mut res: Vec<usize> = vec![0; shared_affix_dag.len()];
-    // root at position 0 has no parent, so let's skip
-    for i in 1..shared_affix_dag.len() {
-        if let Some(p) = shared_affix_dag[i].parent {
-            res[p] += 1;
-        }
-    }
-    res
-}
 
 fn find_and_report_variant_preserving_shared_affixes<W: Write>(graph: &HashGraph, out: &mut io::BufWriter<W>) -> Result<(), Box<dyn Error>> {
     
-    let mut visited: FxHashSet<Handle> = FxHashSet::default();
-
-    let oriented_nodes = graph.handles();
-    for mut start in oriented_nodes {
+    for mut v in graph.handles() {
         for _ in 0..2 {
             log::debug!(
                 "processing oriented node {}{}",
-                if start.is_reverse() { '<' } else { '>' },
-                usize::from(start.id())
+                if v.is_reverse() { '<' } else { '>' },
+                usize::from(v.id())
             );
 
             // process node in forward direction
             // make sure each multifurcation is tested only once
-            if !visited.contains(&start) {
-                let shared_affix_dag =
-                    build_variant_preserving_shared_affix_dag(graph, start, &mut visited)?;
-                let affixes = enumerate_shared_affix_subg(&shared_affix_dag, &graph)?;
-                for affix in affixes.iter() {
-                    print(affix, out)?;
-                }
-            } else {
-                log::debug!(
-                    "skipping oriented visited node {}{}",
-                    if start.is_reverse() { '<' } else { '>' },
-                    usize::from(start.id())
-                );
+            let affixes =
+                enumerate_variant_preserving_shared_affixes(graph, v)?;
+            for affix in affixes.iter() {
+                print(affix, out)?;
             }
 
             // process node in next iteration in reverse direction
-            start = start.flip();
+            v= v.flip();
         }
     }
 
@@ -296,27 +110,16 @@ fn print<W: io::Write>(
     affix: &AffixSubgraph,
     out: &mut io::BufWriter<W>,
 ) -> Result<(), io::Error> {
-    let mut ends = Vec::new();
-    for (v, direction, position) in affix.ends.iter() {
-        ends.push(format!(
-            "{}{}:{}",
-            match direction {
-                Direction::Right => '>',
-                Direction::Left => '<',
-            },
-            v,
-            position
-        ));
-    }
+    let ends : Vec<String> = affix.ends.iter().map(|&v| format!(
+            "{}{}",
+            if v.is_reverse() {'<'} else { '>' },
+            usize::from(v.id()),
+        )).collect();
     writeln!(
         out,
-        "{}{}\t{}\t{}\t{}",
-        match affix.start.1 {
-            Direction::Right => '>',
-            Direction::Left => '<',
-        },
-        &affix.start.0,
-        &affix.start.2,
+        "{}{}\t{}\t{}",
+        if affix.start.is_reverse() {'<'} else { '>' },
+        usize::from(affix.start.id()),
         ends.join(","),
         &affix.sequence,
     )?;
@@ -345,7 +148,6 @@ fn main() -> Result<(), io::Error> {
         "{}",
         [
             "oriented_start_node",
-            "startpos",
             "oriented_end_nodes",
             "shared_sequence",
         ]
