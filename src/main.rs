@@ -117,10 +117,11 @@ fn print<W: io::Write>(
         )).collect();
     writeln!(
         out,
-        "{}{}\t{}\t{}",
+        "{}{}\t{}\t{}\t{}",
         if affix.start.is_reverse() {'<'} else { '>' },
         usize::from(affix.start.id()),
         ends.join(","),
+        affix.sequence.len(),
         &affix.sequence,
     )?;
     Ok(())
@@ -149,7 +150,8 @@ fn main() -> Result<(), io::Error> {
         [
             "oriented_start_node",
             "oriented_end_nodes",
-            "shared_sequence",
+            "prefix_length",
+            "prefix",
         ]
         .join("\t")
     )?;
