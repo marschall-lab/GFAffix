@@ -85,7 +85,7 @@ impl PartialEq for SharedChar {
     }
 }
 
-fn build_shared_affix_dag(
+fn build_variant_preserving_shared_affix_dag(
     graph: &HashGraph,
     start: Handle,
     visited: &mut FxHashSet<Handle>,
@@ -254,7 +254,7 @@ fn get_child_count(shared_affix_dag: &Vec<SharedChar>) -> Vec<usize> {
     res
 }
 
-fn find_and_report_shared_affixes<W: Write>(graph: &HashGraph, out: &mut io::BufWriter<W>) -> Result<(), Box<dyn Error>> {
+fn find_and_report_variant_preserving_shared_affixes<W: Write>(graph: &HashGraph, out: &mut io::BufWriter<W>) -> Result<(), Box<dyn Error>> {
     
     let mut visited: FxHashSet<Handle> = FxHashSet::default();
 
@@ -271,7 +271,7 @@ fn find_and_report_shared_affixes<W: Write>(graph: &HashGraph, out: &mut io::Buf
             // make sure each multifurcation is tested only once
             if !visited.contains(&start) {
                 let shared_affix_dag =
-                    build_shared_affix_dag(graph, start, &mut visited)?;
+                    build_variant_preserving_shared_affix_dag(graph, start, &mut visited)?;
                 let affixes = enumerate_shared_affix_subg(&shared_affix_dag, &graph)?;
                 for affix in affixes.iter() {
                     print(affix, out)?;
@@ -351,7 +351,7 @@ fn main() -> Result<(), io::Error> {
         ]
         .join("\t")
     )?;
-    if let Err(e) = find_and_report_shared_affixes(&graph, &mut out) {
+    if let Err(e) = find_and_report_variant_preserving_shared_affixes(&graph, &mut out) {
         panic!("gfaffix failed: {}", e);
     }
     out.flush()?;
