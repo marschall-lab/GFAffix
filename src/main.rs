@@ -112,7 +112,7 @@ fn enumerate_variant_preserving_shared_affixes(
             // get parents of u
             let mut parents: Vec<Handle> = graph
                 .neighbors(u, Direction::Left)
-                .filter(|w| !del_subg.is_deleted(&u.flip(), w))
+                .filter(|w| !del_subg.is_deleted(&u.flip(), w.flip()))
                 .collect();
             parents.sort();
             // insert child in variant-preserving data structure
