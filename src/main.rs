@@ -9,7 +9,7 @@ use std::io::prelude::*;
 /* crate use */
 use clap::Clap;
 use gfa::{
-    gfa::{Orientation, GFA},
+    gfa::{GFA},
     parser::GFAParser,
 };
 use handlegraph::{
@@ -55,12 +55,10 @@ pub struct DeletedSubGraph {
 
 impl DeletedSubGraph {
     fn add_edge(&mut self, u: Handle, v: Handle) -> bool {
-
-        let mut e = if u.is_reverse() && v.is_reverse() {(u.flip(), v.flip())} else { (u, v) };
-        if e.0 > e.1 {
-            e = (e.1, e.0);
-        }
-        let is_insert = self.edges.insert(e);
+        
+        let configurations = [(u, v), (v, u), (u.flip(), v.flip()), (v.flip(), u.flip())];
+        let e = configurations.iter().min().unwrap();
+        let is_insert = self.edges.insert(*e);
         if is_insert {
             log::debug!(
                 "flag edge {}{}-{}{} as deleted",
@@ -88,10 +86,8 @@ impl DeletedSubGraph {
     }
 
     fn is_deleted(&self, u: &Handle, v: &Handle) -> bool {
-        let mut e = if u.is_reverse() && u.is_reverse() {(u.flip(), v.flip())} else { (*u, *v) };
-        if e.0 > e.1 {
-            e = (e.1, e.0);
-        }
+        let configurations = [(*u, *v), (*v, *u), (u.flip(), v.flip()), (v.flip(), u.flip())];
+        let e = configurations.iter().min().unwrap();
         self.edges.contains(&e)
     }
 
@@ -210,16 +206,13 @@ fn collapse(
 
     //  2. update deleted edge set, reassign outgoing edges of "empty" nodes to dedicated shared
     //     prefix node
-    let mut shared_prefix_node = Handle::new(0, Orientation::Forward);
-    if let Some(v) = shared_prefix_node_maybe {
-        // there will be always a shared prefix node, so this condition is always true
-        shared_prefix_node = v;
-        log::debug!(
-            "node {}{} is dedicated shared prefix node",
-            if v.is_reverse() { '<' } else { '>' },
-            usize::from(v.id())
-        );
-    }
+    // there will be always a shared prefix node, so this condition is always true
+    let shared_prefix_node =shared_prefix_node_maybe.unwrap();
+    log::debug!(
+        "node {}{} is dedicated shared prefix node",
+        if shared_prefix_node.is_reverse() { '<' } else { '>' },
+        usize::from(shared_prefix_node.id()));
+    
     for (u, maybe_v) in splitted_node_pairs {
         if u != shared_prefix_node {
             // rewrire outgoing edges
