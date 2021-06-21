@@ -55,15 +55,19 @@ pub struct DeletedSubGraph {
 
 impl DeletedSubGraph {
     fn add_edge(&mut self, u: Handle, v: Handle) -> bool {
-        let is_insert = self.edges.insert(if u < v { (u, v) } else { (v, u) });
+
+        let mut e = if u.is_reverse() && v.is_reverse() {(u.flip(), v.flip())} else { (u, v) };
+        if e.0 > e.1 {
+            e = (e.1, e.0);
+        }
+        let is_insert = self.edges.insert(e);
         if is_insert {
-            let (x, y) = if u < v { (u, v) } else { (v, u) };
             log::debug!(
                 "flag edge {}{}-{}{} as deleted",
-                if x.is_reverse() { '<' } else { '>' },
-                usize::from(x.id()),
-                if y.is_reverse() { '<' } else { '>' },
-                usize::from(y.id())
+                if e.0.is_reverse() { '<' } else { '>' },
+                usize::from(e.0.id()),
+                if e.1.is_reverse() { '<' } else { '>' },
+                usize::from(e.1.id())
             );
         }
         is_insert
@@ -84,7 +88,10 @@ impl DeletedSubGraph {
     }
 
     fn is_deleted(&self, u: &Handle, v: &Handle) -> bool {
-        let e = if u < v { (*u, *v) } else { (*v, *u) };
+        let mut e = if u.is_reverse() && u.is_reverse() {(u.flip(), v.flip())} else { (*u, *v) };
+        if e.0 > e.1 {
+            e = (e.1, e.0);
+        }
         self.edges.contains(&e)
     }
 
