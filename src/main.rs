@@ -83,6 +83,11 @@ fn enumerate_variant_preserving_shared_affixes(
 
     let mut branch: FxHashMap<(u8, Vec<Handle>), Vec<Handle>> = FxHashMap::default();
     // traverse multifurcation in the forward direction of the handle
+    // 
+    // [2021-06-21T08:29:04Z DEBUG gfaffix] processing oriented node <455520
+    // [2021-06-21T08:29:04Z DEBUG gfaffix] identified shared prefix between nodes <378708,<378708
+    // originating from parents <455520,<455520
+    // 
     for u in graph.neighbors(v, Direction::Right) {
         if !del_subg.is_deleted(&v, &u) {
             let seq = graph.sequence_vec(u);
@@ -195,18 +200,20 @@ fn collapse(
             match maybe_v {
                 Some(v) => {
                     // make all suffixes spring from shared suffix node
-                    graph.create_edge(Edge(shared_prefix_node, v));
-                    log::debug!(
-                        "create edge {}{}-{}{}",
-                        if shared_prefix_node.is_reverse() {
-                            '<'
-                        } else {
-                            '>'
-                        },
-                        usize::from(shared_prefix_node.id()),
-                        if v.is_reverse() { '<' } else { '>' },
-                        usize::from(v.id())
-                    );
+                    if !graph.has_edge(shared_prefix_node, v) {
+                        graph.create_edge(Edge(shared_prefix_node, v));
+                        log::debug!(
+                            "create edge {}{}-{}{}",
+                            if shared_prefix_node.is_reverse() {
+                                '<'
+                            } else {
+                                '>'
+                            },
+                            usize::from(shared_prefix_node.id()),
+                            if v.is_reverse() { '<' } else { '>' },
+                            usize::from(v.id())
+                        );
+                    }
                 }
                 None => {
                     // if node coincides with shared prefix (but is not the dedicated shared prefix
@@ -217,18 +224,20 @@ fn collapse(
                         .filter(|v| !del_subg.is_deleted(&u, v))
                         .collect();
                     for w in outgoing_edges {
-                        graph.create_edge(Edge(shared_prefix_node, w));
-                        log::debug!(
-                            "create edge {}{}-{}{}",
-                            if shared_prefix_node.is_reverse() {
-                                '<'
-                            } else {
-                                '>'
-                            },
-                            usize::from(shared_prefix_node.id()),
-                            if w.is_reverse() { '<' } else { '>' },
-                            usize::from(w.id())
-                        );
+                        if !graph.has_edge(shared_prefix_node, w) {
+                            graph.create_edge(Edge(shared_prefix_node, w));
+                            log::debug!(
+                                "create edge {}{}-{}{}",
+                                if shared_prefix_node.is_reverse() {
+                                    '<'
+                                } else {
+                                    '>'
+                                },
+                                usize::from(shared_prefix_node.id()),
+                                if w.is_reverse() { '<' } else { '>' },
+                                usize::from(w.id())
+                            );
+                        }
                     }
                 }
             }
