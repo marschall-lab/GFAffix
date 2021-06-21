@@ -250,6 +250,8 @@ fn collapse(
                 }
             }
             // mark redundant node as deleted
+            log::debug!("flag {}{} as deleted", 
+                if u.is_reverse() { '<' } else { '>' }, usize::from(u.id()));
             del_subg.add_node(u, &graph);
         }
     }
