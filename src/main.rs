@@ -2,6 +2,7 @@
 use rustc_hash::FxHashMap;
 use rustc_hash::FxHashSet;
 use std::error::Error;
+use std::fs;
 use std::io;
 use std::io::prelude::*;
 
@@ -22,11 +23,21 @@ use handlegraph::{
 #[clap(
     version = "0.1",
     author = "Daniel Doerr <daniel.doerr@hhu.de>",
-    about = "Identify shared suffixes/prefixes in branchings"
+    about = "Identify shared suffixes/prefixes in multifurcaitons of the given graph.\n\n
+    Want log output? Call program with 'RUST_LOG=info gfaffix ...'\n 
+    Log output not informative enough? Call program with 'RUST_LOG=debug gfaffix..."
 )]
 pub struct Command {
     #[clap(index = 1, about = "graph in GFA1 format", required = true)]
     pub graph: String,
+
+    #[clap(
+        short = 'o',
+        long = "output_refined",
+        about = "output refined graph in GFA1 format",
+        default_value = " "
+    )]
+    pub refined_graph_out: String,
 }
 
 // structure for storing reported subgraph
@@ -83,18 +94,15 @@ fn enumerate_variant_preserving_shared_affixes(
 
     let mut branch: FxHashMap<(u8, Vec<Handle>), Vec<Handle>> = FxHashMap::default();
     // traverse multifurcation in the forward direction of the handle
-    // 
-    // [2021-06-21T08:29:04Z DEBUG gfaffix] processing oriented node <455520
-    // [2021-06-21T08:29:04Z DEBUG gfaffix] identified shared prefix between nodes <378708,<378708
-    // originating from parents <455520,<455520
-    // 
     for u in graph.neighbors(v, Direction::Right) {
         if !del_subg.is_deleted(&v, &u) {
             let seq = graph.sequence_vec(u);
 
             // get parents of u
-            let mut parents: Vec<Handle> = graph.neighbors(u, Direction::Left).filter(|w|
-                !del_subg.is_deleted(&u, w)).collect();
+            let mut parents: Vec<Handle> = graph
+                .neighbors(u, Direction::Left)
+                .filter(|w| !del_subg.is_deleted(&u, w))
+                .collect();
             parents.sort();
             // insert child in variant-preserving data structure
             branch
@@ -337,6 +345,36 @@ fn print<W: io::Write>(affix: &AffixSubgraph, out: &mut io::BufWriter<W>) -> Res
     Ok(())
 }
 
+fn print_active_subgraph<W: io::Write>(
+    graph: &HashGraph,
+    del_subg: &DeletedSubGraph,
+    out: &mut io::BufWriter<W>,
+) -> Result<(), Box<dyn Error>> {
+    for v in graph.handles() {
+        if !del_subg.nodes.contains(&v) {
+            writeln!(
+                out,
+                "S\t{}\t{}",
+                usize::from(v.id()),
+                String::from_utf8(graph.sequence_vec(v))?
+            )?;
+        }
+    }
+    for Edge(u, v) in graph.edges() {
+        if !del_subg.is_deleted(&u, &v) {
+            writeln!(
+                out,
+                "L\t{}\t{}\t{}\t{}\t0",
+                usize::from(u.id()),
+                if u.is_reverse() { '<' } else { '>' },
+                usize::from(v.id()),
+                if v.is_reverse() { '<' } else { '>' }
+            )?;
+        }
+    }
+    Ok(())
+}
+
 fn main() -> Result<(), io::Error> {
     env_logger::init();
 
@@ -358,15 +396,30 @@ fn main() -> Result<(), io::Error> {
         out,
         "{}",
         [
-            "oriented_start_node",
-            "oriented_end_nodes",
+            "oriented_parent_nodes",
+            "oriented_child_nodes",
             "prefix_length",
             "prefix",
         ]
         .join("\t")
     )?;
-    if let Err(e) = find_and_report_variant_preserving_shared_affixes(&mut graph, &mut out) {
-        panic!("gfaffix failed: {}", e);
+    let res = find_and_report_variant_preserving_shared_affixes(&mut graph, &mut out);
+
+    match res {
+        Err(e) => panic!("gfaffix failed: {}", e),
+        Ok(del_subg) => {
+            if !params.refined_graph_out.trim().is_empty() {
+                let mut graph_out =
+                    io::BufWriter::new(fs::File::create(params.refined_graph_out.clone())?);
+                if let Err(e) = print_active_subgraph(&graph, &del_subg, &mut graph_out) {
+                    panic!(
+                        "unable to write refined graph to {}: {}",
+                        params.refined_graph_out.clone(),
+                        e
+                    );
+                }
+            }
+        }
     }
     out.flush()?;
     log::info!("done");
