@@ -299,23 +299,28 @@ fn find_and_report_variant_preserving_shared_affixes<W: Write>(
 ) -> Result<DeletedSubGraph, Box<dyn Error>> {
     let mut del_subg = DeletedSubGraph::new();
 
-    let mut queue: VecDeque<Handle> = VecDeque::new();
-    queue.extend(graph.handles().chain(graph.handles().map(|v| v.flip())));
-    while let Some(v) = queue.pop_front() {
-        if !del_subg.nodes.contains(&v) {
-            log::debug!(
-                "processing oriented node {}{}",
-                if v.is_reverse() { '<' } else { '>' },
-                usize::from(v.id())
-            );
+    let mut has_changed = true;
+    while has_changed {
+        has_changed = false;
+        let mut queue: VecDeque<Handle> = VecDeque::new();
+        queue.extend(graph.handles().chain(graph.handles().map(|v| v.flip())));
+        while let Some(v) = queue.pop_front() {
+            if !del_subg.nodes.contains(&v) {
+                log::debug!(
+                    "processing oriented node {}{}",
+                    if v.is_reverse() { '<' } else { '>' },
+                    usize::from(v.id())
+                );
 
-            // process node in forward direction
-            let affixes = enumerate_variant_preserving_shared_affixes(graph, &del_subg, v)?;
-            for affix in affixes.iter() {
-                print(affix, out)?;
-                let shared_prefix_node = collapse(graph, affix, &mut del_subg);
-                queue.push_back(shared_prefix_node);
-                queue.push_back(shared_prefix_node.flip());
+                // process node in forward direction
+                let affixes = enumerate_variant_preserving_shared_affixes(graph, &del_subg, v)?;
+                for affix in affixes.iter() {
+                    has_changed |= true;
+                    print(affix, out)?;
+                    let shared_prefix_node = collapse(graph, affix, &mut del_subg);
+                    queue.push_back(shared_prefix_node);
+                    queue.push_back(shared_prefix_node.flip());
+                }
             }
         }
     }
