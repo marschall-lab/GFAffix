@@ -149,7 +149,7 @@ fn collapse(
 
     //  2. update deleted edge set, reassign outgoing edges of "empty" nodes to dedicated shared
     //     prefix node
-    let mut shared_prefix_node = Handle::new(usize::MAX, Orientation::Forward);
+    let mut shared_prefix_node = Handle::new(usize::MAX-1, Orientation::Forward);
     if let Some(v) = shared_prefix_node_maybe {
         // there will be always a shared prefix node, so this condition is always true
         shared_prefix_node = v;
