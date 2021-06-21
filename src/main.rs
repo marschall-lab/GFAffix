@@ -2,17 +2,20 @@
 use rustc_hash::FxHashMap;
 use rustc_hash::FxHashSet;
 use std::error::Error;
-use std::io::prelude::*;
 use std::io;
+use std::io::prelude::*;
 
 /* crate use */
 use clap::Clap;
-use gfa::{gfa::{GFA, Orientation}, parser::GFAParser};
+use gfa::{
+    gfa::{Orientation, GFA},
+    parser::GFAParser,
+};
 use handlegraph::{
-    handle::{Direction, Handle, Edge},
+    handle::{Direction, Edge, Handle},
     handlegraph::*,
     hashgraph::HashGraph,
-    mutablehandlegraph::{MutableHandles, AdditiveHandleGraph},
+    mutablehandlegraph::{AdditiveHandleGraph, MutableHandles},
 };
 
 #[derive(clap::Clap, Debug)]
@@ -39,32 +42,32 @@ pub struct DeletedSubGraph {
     pub nodes: FxHashSet<Handle>,
 }
 
-
 impl DeletedSubGraph {
-
     fn add_edge(&mut self, u: Handle, v: Handle) -> bool {
         self.edges.insert(if u < v { (u, v) } else { (v, u) })
     }
-    
-    fn add_node(&mut self, v: Handle, graph : &HashGraph) -> bool {
+
+    fn add_node(&mut self, v: Handle, graph: &HashGraph) -> bool {
         let mut res = false;
         res |= self.nodes.insert(v);
         res |= self.nodes.insert(v.flip());
 
-        for u in graph.neighbors(v, Direction::Left).chain(graph.neighbors(v, Direction::Right)) {
+        for u in graph
+            .neighbors(v, Direction::Left)
+            .chain(graph.neighbors(v, Direction::Right))
+        {
             res |= self.add_edge(u, v);
         }
         res
     }
 
     fn new() -> Self {
-        DeletedSubGraph { 
-            edges : FxHashSet::default(), 
-            nodes : FxHashSet::default()
+        DeletedSubGraph {
+            edges: FxHashSet::default(),
+            nodes: FxHashSet::default(),
         }
     }
 }
-
 
 fn enumerate_variant_preserving_shared_affixes(
     graph: &HashGraph,
@@ -100,31 +103,47 @@ fn enumerate_variant_preserving_shared_affixes(
     Ok(res)
 }
 
-
-fn collapse(graph: &mut HashGraph, shared_prefix: &AffixSubgraph, del_subg: &mut DeletedSubGraph)
-    -> Handle {
-
+fn collapse(
+    graph: &mut HashGraph,
+    shared_prefix: &AffixSubgraph,
+    del_subg: &mut DeletedSubGraph,
+) -> Handle {
     let prefix_len = shared_prefix.sequence.len();
 
     // update graph in two passes:
     //  1. split nodes into shared prefix and distinct suffix and appoint dedicated shared
     //  prefix node
-    let mut shared_prefix_node_maybe : Option<Handle> = None;
-    let mut splitted_node_pairs : Vec<(Handle, Option<Handle>)> = Vec::new();
+    let mut shared_prefix_node_maybe: Option<Handle> = None;
+    let mut splitted_node_pairs: Vec<(Handle, Option<Handle>)> = Vec::new();
     for v in shared_prefix.shared_prefix_nodes.iter() {
         if graph.sequence_vec(*v).len() < prefix_len {
-            // x corresponds to the shared prefix, 
+            // x corresponds to the shared prefix,
             let (x, u) = graph.split_handle(*v, prefix_len);
-            splitted_node_pairs.push((x, Some(u))); 
+            splitted_node_pairs.push((x, Some(u)));
             // update dedicated shared prefix node if none has been assigned yet
             if shared_prefix_node_maybe == None {
                 shared_prefix_node_maybe = Some(x);
             }
+            log::debug!(
+                "splitting node {}{} into prefix {}{} and suffix {}{}",
+                if v.is_reverse() { '<' } else { '>' },
+                usize::from(v.id()),
+                if x.is_reverse() { '<' } else { '>' },
+                usize::from(x.id()),
+                if u.is_reverse() { '<' } else { '>' },
+                usize::from(u.id())
+            );
         } else {
             // always use a node as dedicated shared prefix node if that node coincides with the
             // prefix
-            shared_prefix_node_maybe = Some(*v); 
-            splitted_node_pairs.push((*v, None)); 
+            shared_prefix_node_maybe = Some(*v);
+            splitted_node_pairs.push((*v, None));
+            log::debug!(
+                "node {}{} matches prefix {}",
+                if v.is_reverse() { '<' } else { '>' },
+                usize::from(v.id()),
+                &shared_prefix.sequence
+            );
         }
     }
 
@@ -134,35 +153,61 @@ fn collapse(graph: &mut HashGraph, shared_prefix: &AffixSubgraph, del_subg: &mut
     if let Some(v) = shared_prefix_node_maybe {
         // there will be always a shared prefix node, so this condition is always true
         shared_prefix_node = v;
+        log::debug!(
+            "node {}{} is dedicated shared prefix node",
+            if v.is_reverse() { '<' } else { '>' },
+            usize::from(v.id())
+        );
     }
     for (u, maybe_v) in splitted_node_pairs {
         if u != shared_prefix_node {
             // mark redundant node as deleted
-            del_subg.add_node(u, &graph); 
-            // rewrire incoming edges
-            let incoming_edges : Vec<Handle> = graph.neighbors(u, Direction::Left).collect();
-            for w in  incoming_edges {
-                graph.create_edge(Edge(w, shared_prefix_node.flip()));
-            }
+            del_subg.add_node(u, &graph);
+
             // rewrire outgoing edges
-            let outgoing_edges : Vec<Handle> = graph.neighbors(u, Direction::Right).collect();
             match maybe_v {
                 Some(v) => {
+                    // make all suffixes spring from shared suffix node
                     graph.create_edge(Edge(shared_prefix_node, v));
-                },
+                    log::debug!(
+                        "create edge {}{}-{}{}",
+                        if shared_prefix_node.is_reverse() {
+                            '<'
+                        } else {
+                            '>'
+                        },
+                        usize::from(shared_prefix_node.id()),
+                        if v.is_reverse() { '<' } else { '>' },
+                        usize::from(v.id())
+                    );
+                }
                 None => {
+                    // if node coincides with shared prefix (but is not the dedicated shared prefix
+                    // node), then all outgoing edges of this node must be transferred to dedicated
+                    // node
+                    let outgoing_edges: Vec<Handle> =
+                        graph.neighbors(u, Direction::Right).collect();
                     for w in outgoing_edges {
                         graph.create_edge(Edge(shared_prefix_node, w));
+                        log::debug!(
+                            "create edge {}{}-{}{}",
+                            if shared_prefix_node.is_reverse() {
+                                '<'
+                            } else {
+                                '>'
+                            },
+                            usize::from(shared_prefix_node.id()),
+                            if w.is_reverse() { '<' } else { '>' },
+                            usize::from(w.id())
+                        );
                     }
                 }
             }
         }
     }
-    
-    shared_prefix_node
-    
-}
 
+    shared_prefix_node
+}
 
 fn get_shared_prefix(
     nodes: &Vec<Handle>,
@@ -192,13 +237,12 @@ fn find_and_report_variant_preserving_shared_affixes<W: Write>(
     graph: &mut HashGraph,
     out: &mut io::BufWriter<W>,
 ) -> Result<DeletedSubGraph, Box<dyn Error>> {
-
     let mut del_subg = DeletedSubGraph::new();
 
-    let mut queue : Vec<Handle> = Vec::new();
+    let mut queue: Vec<Handle> = Vec::new();
     queue.extend(graph.handles().chain(graph.handles().map(|v| v.flip())));
     while let Some(v) = queue.pop() {
-        if !del_subg.nodes.contains(&v) { 
+        if !del_subg.nodes.contains(&v) {
             log::debug!(
                 "processing oriented node {}{}",
                 if v.is_reverse() { '<' } else { '>' },
