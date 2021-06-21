@@ -2,6 +2,7 @@
 use rustc_hash::FxHashMap;
 use rustc_hash::FxHashSet;
 use std::error::Error;
+use std::collections::VecDeque;
 use std::fs;
 use std::io;
 use std::io::prelude::*;
@@ -298,9 +299,9 @@ fn find_and_report_variant_preserving_shared_affixes<W: Write>(
 ) -> Result<DeletedSubGraph, Box<dyn Error>> {
     let mut del_subg = DeletedSubGraph::new();
 
-    let mut queue: Vec<Handle> = Vec::new();
+    let mut queue: VecDeque<Handle> = VecDeque::new();
     queue.extend(graph.handles().chain(graph.handles().map(|v| v.flip())));
-    while let Some(v) = queue.pop() {
+    while let Some(v) = queue.pop_front() {
         if !del_subg.nodes.contains(&v) {
             log::debug!(
                 "processing oriented node {}{}",
@@ -313,8 +314,8 @@ fn find_and_report_variant_preserving_shared_affixes<W: Write>(
             for affix in affixes.iter() {
                 print(affix, out)?;
                 let shared_prefix_node = collapse(graph, affix, &mut del_subg);
-                queue.push(shared_prefix_node);
-                queue.push(shared_prefix_node.flip());
+                queue.push_back(shared_prefix_node);
+                queue.push_back(shared_prefix_node.flip());
             }
         }
     }
