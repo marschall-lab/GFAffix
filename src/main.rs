@@ -61,6 +61,11 @@ impl DeletedSubGraph {
         res
     }
 
+    fn is_deleted(&self, u: &Handle, v: &Handle) -> bool {
+        let e = if u < v { (*u, *v) } else { (*v, *u) };
+        self.edges.contains(&e)
+    }
+
     fn new() -> Self {
         DeletedSubGraph {
             edges: FxHashSet::default(),
@@ -71,6 +76,7 @@ impl DeletedSubGraph {
 
 fn enumerate_variant_preserving_shared_affixes(
     graph: &HashGraph,
+    del_subg: &DeletedSubGraph,
     v: Handle,
 ) -> Result<Vec<AffixSubgraph>, Box<dyn Error>> {
     let mut res: Vec<AffixSubgraph> = Vec::new();
@@ -78,16 +84,19 @@ fn enumerate_variant_preserving_shared_affixes(
     let mut branch: FxHashMap<(u8, Vec<Handle>), Vec<Handle>> = FxHashMap::default();
     // traverse multifurcation in the forward direction of the handle
     for u in graph.neighbors(v, Direction::Right) {
-        let seq = graph.sequence_vec(u);
+        if !del_subg.is_deleted(&v, &u) {
+            let seq = graph.sequence_vec(u);
 
-        // get parents of u
-        let mut parents: Vec<Handle> = graph.neighbors(u, Direction::Left).collect();
-        parents.sort();
-        // insert child in variant-preserving data structure
-        branch
-            .entry((seq[0], parents))
-            .or_insert(Vec::new())
-            .push(u);
+            // get parents of u
+            let mut parents: Vec<Handle> = graph.neighbors(u, Direction::Left).filter(|w|
+                !del_subg.is_deleted(&u, w)).collect();
+            parents.sort();
+            // insert child in variant-preserving data structure
+            branch
+                .entry((seq[0], parents))
+                .or_insert(Vec::new())
+                .push(u);
+        }
     }
 
     for ((_, parents), children) in branch.iter() {
@@ -182,9 +191,6 @@ fn collapse(
     }
     for (u, maybe_v) in splitted_node_pairs {
         if u != shared_prefix_node {
-            // mark redundant node as deleted
-            del_subg.add_node(u, &graph);
-
             // rewrire outgoing edges
             match maybe_v {
                 Some(v) => {
@@ -206,8 +212,10 @@ fn collapse(
                     // if node coincides with shared prefix (but is not the dedicated shared prefix
                     // node), then all outgoing edges of this node must be transferred to dedicated
                     // node
-                    let outgoing_edges: Vec<Handle> =
-                        graph.neighbors(u, Direction::Right).collect();
+                    let outgoing_edges: Vec<Handle> = graph
+                        .neighbors(u, Direction::Right)
+                        .filter(|v| !del_subg.is_deleted(&u, v))
+                        .collect();
                     for w in outgoing_edges {
                         graph.create_edge(Edge(shared_prefix_node, w));
                         log::debug!(
@@ -224,6 +232,8 @@ fn collapse(
                     }
                 }
             }
+            // mark redundant node as deleted
+            del_subg.add_node(u, &graph);
         }
     }
 
@@ -271,7 +281,7 @@ fn find_and_report_variant_preserving_shared_affixes<W: Write>(
             );
 
             // process node in forward direction
-            let affixes = enumerate_variant_preserving_shared_affixes(graph, v)?;
+            let affixes = enumerate_variant_preserving_shared_affixes(graph, &del_subg, v)?;
             for affix in affixes.iter() {
                 print(affix, out)?;
                 let shared_prefix_node = collapse(graph, affix, &mut del_subg);
