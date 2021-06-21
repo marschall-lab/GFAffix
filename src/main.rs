@@ -54,21 +54,18 @@ pub struct DeletedSubGraph {
 }
 
 impl DeletedSubGraph {
-    fn add_edge(&mut self, u: Handle, v: Handle) -> bool {
+    fn add_edge(&mut self, u: Handle, v: Handle) {
         
         let configurations = [(u, v), (v, u), (u.flip(), v.flip()), (v.flip(), u.flip())];
+        self.edges.extend(&configurations);
         let e = configurations.iter().min().unwrap();
-        let is_insert = self.edges.insert(*e);
-        if is_insert {
-            log::debug!(
-                "flag edge {}{}-{}{} as deleted",
-                if e.0.is_reverse() { '<' } else { '>' },
-                usize::from(e.0.id()),
-                if e.1.is_reverse() { '<' } else { '>' },
-                usize::from(e.1.id())
-            );
-        }
-        is_insert
+        log::debug!(
+            "flag edge {}{}-{}{} as deleted",
+            if e.0.is_reverse() { '<' } else { '>' },
+            usize::from(e.0.id()),
+            if e.1.is_reverse() { '<' } else { '>' },
+            usize::from(e.1.id())
+        );
     }
 
     fn add_node(&mut self, v: Handle, graph: &HashGraph) -> bool {
@@ -77,18 +74,16 @@ impl DeletedSubGraph {
         res |= self.nodes.insert(v.flip());
 
         for u in graph.neighbors(v, Direction::Left) {
-            res |= self.add_edge(u.flip(), v.flip());
+            self.add_edge(u.flip(), v.flip());
         }
         for u in graph.neighbors(v, Direction::Right) {
-            res |= self.add_edge(u, v);
+            self.add_edge(u, v);
         }
         res
     }
 
     fn is_deleted(&self, u: &Handle, v: &Handle) -> bool {
-        let configurations = [(*u, *v), (*v, *u), (u.flip(), v.flip()), (v.flip(), u.flip())];
-        let e = configurations.iter().min().unwrap();
-        self.edges.contains(&e)
+        self.edges.contains(&(*u, *v))
     }
 
     fn new() -> Self {
