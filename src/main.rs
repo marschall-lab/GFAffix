@@ -78,7 +78,7 @@ impl DeletedSubGraph {
             res |= self.add_edge(u.flip(), v.flip());
         }
         for u in graph.neighbors(v, Direction::Right) {
-            res |= self.add_edge(u.flip(), v);
+            res |= self.add_edge(u, v);
         }
         res
     }
