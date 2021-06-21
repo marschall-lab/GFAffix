@@ -1,18 +1,19 @@
 /* standard use */
 use rustc_hash::FxHashMap;
+use rustc_hash::FxHashSet;
 use std::error::Error;
-use std::io;
 use std::io::prelude::*;
+use std::io;
 
 /* crate use */
 use clap::Clap;
-use gfa::{gfa::GFA, parser::GFAParser};
+use gfa::{gfa::{GFA, Orientation}, parser::GFAParser};
 use handlegraph::{
-    handle::{Direction, Handle},
+    handle::{Direction, Handle, Edge},
     handlegraph::*,
     hashgraph::HashGraph,
+    mutablehandlegraph::{MutableHandles, AdditiveHandleGraph},
 };
-
 
 #[derive(clap::Clap, Debug)]
 #[clap(
@@ -28,8 +29,40 @@ pub struct Command {
 // structure for storing reported subgraph
 pub struct AffixSubgraph {
     pub sequence: String,
-    pub start: Handle,
-    pub ends: Vec<Handle>,
+    pub parents: Vec<Handle>,
+    pub shared_prefix_nodes: Vec<Handle>,
+}
+
+#[derive(Clone, Debug)]
+pub struct DeletedSubGraph {
+    pub edges: FxHashSet<(Handle, Handle)>,
+    pub nodes: FxHashSet<Handle>,
+}
+
+
+impl DeletedSubGraph {
+
+    fn add_edge(&mut self, u: Handle, v: Handle) -> bool {
+        self.edges.insert(if u < v { (u, v) } else { (v, u) })
+    }
+    
+    fn add_node(&mut self, v: Handle, graph : &HashGraph) -> bool {
+        let mut res = false;
+        res |= self.nodes.insert(v);
+        res |= self.nodes.insert(v.flip());
+
+        for u in graph.neighbors(v, Direction::Left).chain(graph.neighbors(v, Direction::Right)) {
+            res |= self.add_edge(u, v);
+        }
+        res
+    }
+
+    fn new() -> Self {
+        DeletedSubGraph { 
+            edges : FxHashSet::default(), 
+            nodes : FxHashSet::default()
+        }
+    }
 }
 
 
@@ -45,32 +78,108 @@ fn enumerate_variant_preserving_shared_affixes(
         let seq = graph.sequence_vec(u);
 
         // get parents of u
-        let mut parents : Vec<Handle> = graph.neighbors(u, Direction::Left).collect();
+        let mut parents: Vec<Handle> = graph.neighbors(u, Direction::Left).collect();
         parents.sort();
         // insert child in variant-preserving data structure
-        branch.entry((seq[0], parents)).or_insert(Vec::new()).push(u);
+        branch
+            .entry((seq[0], parents))
+            .or_insert(Vec::new())
+            .push(u);
     }
 
-    for children in branch.values() {
+    for ((_, parents), children) in branch.iter() {
         if children.len() > 1 {
-            res.push(AffixSubgraph { sequence : get_shared_prefix(children, graph)?, start : v, ends : children.clone()});
+            res.push(AffixSubgraph {
+                sequence: get_shared_prefix(children, graph)?,
+                parents: parents.clone(),
+                shared_prefix_nodes: children.clone(),
+            });
         }
     }
-     
+
     Ok(res)
 }
 
 
-fn get_shared_prefix(nodes: &Vec<Handle>, graph: &HashGraph) -> Result<String, std::string::FromUtf8Error> {
-    let mut seq: Vec<u8> = Vec::new();
+fn collapse(graph: &mut HashGraph, shared_prefix: &AffixSubgraph, del_subg: &mut DeletedSubGraph)
+    -> Handle {
+
+    let prefix_len = shared_prefix.sequence.len();
+
+    // update graph in two passes:
+    //  1. split nodes into shared prefix and distinct suffix and appoint dedicated shared
+    //  prefix node
+    let mut shared_prefix_node_maybe : Option<Handle> = None;
+    let mut splitted_node_pairs : Vec<(Handle, Option<Handle>)> = Vec::new();
+    for v in shared_prefix.shared_prefix_nodes.iter() {
+        if graph.sequence_vec(*v).len() < prefix_len {
+            // x corresponds to the shared prefix, 
+            let (x, u) = graph.split_handle(*v, prefix_len);
+            splitted_node_pairs.push((x, Some(u))); 
+            // update dedicated shared prefix node if none has been assigned yet
+            if shared_prefix_node_maybe == None {
+                shared_prefix_node_maybe = Some(x);
+            }
+        } else {
+            // always use a node as dedicated shared prefix node if that node coincides with the
+            // prefix
+            shared_prefix_node_maybe = Some(*v); 
+            splitted_node_pairs.push((*v, None)); 
+        }
+    }
+
+    //  2. update deleted edge set, reassign outgoing edges of "empty" nodes to dedicated shared
+    //     prefix node
+    let mut shared_prefix_node = Handle::new(usize::MAX, Orientation::Forward);
+    if let Some(v) = shared_prefix_node_maybe {
+        // there will be always a shared prefix node, so this condition is always true
+        shared_prefix_node = v;
+    }
+    for (u, maybe_v) in splitted_node_pairs {
+        if u != shared_prefix_node {
+            // mark redundant node as deleted
+            del_subg.add_node(u, &graph); 
+            // rewrire incoming edges
+            let incoming_edges : Vec<Handle> = graph.neighbors(u, Direction::Left).collect();
+            for w in  incoming_edges {
+                graph.create_edge(Edge(w, shared_prefix_node.flip()));
+            }
+            // rewrire outgoing edges
+            let outgoing_edges : Vec<Handle> = graph.neighbors(u, Direction::Right).collect();
+            match maybe_v {
+                Some(v) => {
+                    graph.create_edge(Edge(shared_prefix_node, v));
+                },
+                None => {
+                    for w in outgoing_edges {
+                        graph.create_edge(Edge(shared_prefix_node, w));
+                    }
+                }
+            }
+        }
+    }
     
-    let sequences : Vec<Vec<u8>> = nodes.iter().map(|v| graph.sequence_vec(*v)).collect();
+    shared_prefix_node
+    
+}
+
+
+fn get_shared_prefix(
+    nodes: &Vec<Handle>,
+    graph: &HashGraph,
+) -> Result<String, std::string::FromUtf8Error> {
+    let mut seq: Vec<u8> = Vec::new();
+
+    let sequences: Vec<Vec<u8>> = nodes.iter().map(|v| graph.sequence_vec(*v)).collect();
 
     let mut i = 0;
     while sequences[0].len() > i {
-        let c : u8 = sequences[0][i];
-        if sequences.iter().any(|other| other.len() <= i || other[i] != c) {
-            break
+        let c: u8 = sequences[0][i];
+        if sequences
+            .iter()
+            .any(|other| other.len() <= i || other[i] != c)
+        {
+            break;
         }
         seq.push(c);
         i += 1;
@@ -79,11 +188,17 @@ fn get_shared_prefix(nodes: &Vec<Handle>, graph: &HashGraph) -> Result<String, s
     String::from_utf8(seq)
 }
 
+fn find_and_report_variant_preserving_shared_affixes<W: Write>(
+    graph: &mut HashGraph,
+    out: &mut io::BufWriter<W>,
+) -> Result<DeletedSubGraph, Box<dyn Error>> {
 
-fn find_and_report_variant_preserving_shared_affixes<W: Write>(graph: &HashGraph, out: &mut io::BufWriter<W>) -> Result<(), Box<dyn Error>> {
-    
-    for mut v in graph.handles() {
-        for _ in 0..2 {
+    let mut del_subg = DeletedSubGraph::new();
+
+    let mut queue : Vec<Handle> = Vec::new();
+    queue.extend(graph.handles().chain(graph.handles().map(|v| v.flip())));
+    while let Some(v) = queue.pop() {
+        if !del_subg.nodes.contains(&v) { 
             log::debug!(
                 "processing oriented node {}{}",
                 if v.is_reverse() { '<' } else { '>' },
@@ -91,36 +206,47 @@ fn find_and_report_variant_preserving_shared_affixes<W: Write>(graph: &HashGraph
             );
 
             // process node in forward direction
-            // make sure each multifurcation is tested only once
-            let affixes =
-                enumerate_variant_preserving_shared_affixes(graph, v)?;
+            let affixes = enumerate_variant_preserving_shared_affixes(graph, v)?;
             for affix in affixes.iter() {
                 print(affix, out)?;
+                let shared_prefix_node = collapse(graph, affix, &mut del_subg);
+                queue.push(shared_prefix_node);
+                queue.push(shared_prefix_node.flip());
             }
-
-            // process node in next iteration in reverse direction
-            v= v.flip();
         }
     }
 
-    Ok(())
+    Ok(del_subg)
 }
 
-fn print<W: io::Write>(
-    affix: &AffixSubgraph,
-    out: &mut io::BufWriter<W>,
-) -> Result<(), io::Error> {
-    let ends : Vec<String> = affix.ends.iter().map(|&v| format!(
-            "{}{}",
-            if v.is_reverse() {'<'} else { '>' },
-            usize::from(v.id()),
-        )).collect();
+fn print<W: io::Write>(affix: &AffixSubgraph, out: &mut io::BufWriter<W>) -> Result<(), io::Error> {
+    let parents: Vec<String> = affix
+        .parents
+        .iter()
+        .map(|&v| {
+            format!(
+                "{}{}",
+                if v.is_reverse() { '<' } else { '>' },
+                usize::from(v.id()),
+            )
+        })
+        .collect();
+    let children: Vec<String> = affix
+        .shared_prefix_nodes
+        .iter()
+        .map(|&v| {
+            format!(
+                "{}{}",
+                if v.is_reverse() { '<' } else { '>' },
+                usize::from(v.id()),
+            )
+        })
+        .collect();
     writeln!(
         out,
-        "{}{}\t{}\t{}\t{}",
-        if affix.start.is_reverse() {'<'} else { '>' },
-        usize::from(affix.start.id()),
-        ends.join(","),
+        "{}\t{}\t{}\t{}",
+        parents.join(","),
+        children.join(","),
         affix.sequence.len(),
         &affix.sequence,
     )?;
@@ -141,7 +267,7 @@ fn main() -> Result<(), io::Error> {
     let gfa: GFA<usize, ()> = parser.parse_file(&params.graph).unwrap();
 
     log::info!("constructing handle graph");
-    let graph = HashGraph::from_gfa(&gfa);
+    let mut graph = HashGraph::from_gfa(&gfa);
 
     log::info!("identifying variant-preserving shared prefixes");
     writeln!(
@@ -155,7 +281,7 @@ fn main() -> Result<(), io::Error> {
         ]
         .join("\t")
     )?;
-    if let Err(e) = find_and_report_variant_preserving_shared_affixes(&graph, &mut out) {
+    if let Err(e) = find_and_report_variant_preserving_shared_affixes(&mut graph, &mut out) {
         panic!("gfaffix failed: {}", e);
     }
     out.flush()?;
