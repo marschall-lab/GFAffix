@@ -55,7 +55,18 @@ pub struct DeletedSubGraph {
 
 impl DeletedSubGraph {
     fn add_edge(&mut self, u: Handle, v: Handle) -> bool {
-        self.edges.insert(if u < v { (u, v) } else { (v, u) })
+        let is_insert = self.edges.insert(if u < v { (u, v) } else { (v, u) });
+        if is_insert {
+            let (x, y) = if u < v { (u, v) } else { (v, u) };
+            log::debug!(
+                "flag edge {}{}-{}{} as deleted",
+                if x.is_reverse() { '<' } else { '>' },
+                usize::from(x.id()),
+                if y.is_reverse() { '<' } else { '>' },
+                usize::from(y.id())
+            );
+        }
+        is_insert
     }
 
     fn add_node(&mut self, v: Handle, graph: &HashGraph) -> bool {
@@ -250,8 +261,11 @@ fn collapse(
                 }
             }
             // mark redundant node as deleted
-            log::debug!("flag {}{} as deleted", 
-                if u.is_reverse() { '<' } else { '>' }, usize::from(u.id()));
+            log::debug!(
+                "flag {}{} as deleted",
+                if u.is_reverse() { '<' } else { '>' },
+                usize::from(u.id())
+            );
             del_subg.add_node(u, &graph);
         }
     }
