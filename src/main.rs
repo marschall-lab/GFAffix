@@ -74,10 +74,10 @@ impl DeletedSubGraph {
         res |= self.nodes.insert(v);
         res |= self.nodes.insert(v.flip());
 
-        for u in graph
-            .neighbors(v, Direction::Left)
-            .chain(graph.neighbors(v, Direction::Right))
-        {
+        for u in graph.neighbors(v, Direction::Left) {
+            res |= self.add_edge(u.flip(), v);
+        }
+        for u in graph.neighbors(v, Direction::Right) {
             res |= self.add_edge(u, v);
         }
         res
@@ -112,7 +112,7 @@ fn enumerate_variant_preserving_shared_affixes(
             // get parents of u
             let mut parents: Vec<Handle> = graph
                 .neighbors(u, Direction::Left)
-                .filter(|w| !del_subg.is_deleted(&u, w))
+                .filter(|w| !del_subg.is_deleted(&u.flip(), w))
                 .collect();
             parents.sort();
             // insert child in variant-preserving data structure
