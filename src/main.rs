@@ -92,6 +92,27 @@ fn enumerate_variant_preserving_shared_affixes(
 
     for ((_, parents), children) in branch.iter() {
         if children.len() > 1 {
+            log::debug!(
+                "identified shared prefix between nodes {} originating from parents {}",
+                children
+                    .iter()
+                    .map(|v| format!(
+                        "{}{}",
+                        if v.is_reverse() { '<' } else { '>' },
+                        usize::from(v.id())
+                    ))
+                    .collect::<Vec<String>>()
+                    .join(","),
+                parents
+                    .iter()
+                    .map(|v| format!(
+                        "{}{}",
+                        if v.is_reverse() { '<' } else { '>' },
+                        usize::from(v.id())
+                    ))
+                    .collect::<Vec<String>>()
+                    .join(",")
+            );
             res.push(AffixSubgraph {
                 sequence: get_shared_prefix(children, graph)?,
                 parents: parents.clone(),
