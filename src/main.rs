@@ -364,11 +364,11 @@ fn print_active_subgraph<W: io::Write>(
         if !del_subg.is_deleted(&u, &v) {
             writeln!(
                 out,
-                "L\t{}\t{}\t{}\t{}\t0",
+                "L\t{}\t{}\t{}\t{}\t0M",
                 usize::from(u.id()),
-                if u.is_reverse() { '<' } else { '>' },
+                if u.is_reverse() { '-' } else { '+' },
                 usize::from(v.id()),
-                if v.is_reverse() { '<' } else { '>' }
+                if v.is_reverse() { '-' } else { '+' }
             )?;
         }
     }
