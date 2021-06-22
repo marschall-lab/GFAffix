@@ -95,24 +95,35 @@ impl DeletedSubGraph {
 pub struct CollapseEventTracker {
     pub visited: FxHashSet<Handle>,
     pub overlapping_events: usize,
+    pub bubbles: usize,
     pub events: usize,
 }
 
 impl CollapseEventTracker {
-    fn report(&mut self, shared_prefix_nodes: &Vec<Handle>, collapsed_prefix_node: Handle) {
+    fn report(&mut self, graph: &HashGraph, affix: &AffixSubgraph, collapsed_prefix_node: Handle) {
         self.events += 1;
-        for v in shared_prefix_nodes.iter() {
-            if self.visited.contains(v) {
+        let prefix_len = graph.sequence_vec(collapsed_prefix_node).len();
+        let is_bubble = affix
+            .shared_prefix_nodes
+            .iter()
+            .any(|v| graph.sequence_vec(*v).len() != prefix_len);
+        for v in affix.shared_prefix_nodes.iter() {
+            if self.visited.contains(v) || (is_bubble && self.visited.contains(&v.flip())) {
                 self.overlapping_events += 1
             }
         }
         self.visited.insert(collapsed_prefix_node);
+        if is_bubble {
+            self.visited.insert(collapsed_prefix_node.flip());
+            self.bubbles += 1;
+        }
     }
 
     fn new() -> Self {
         CollapseEventTracker {
             visited: FxHashSet::default(),
             overlapping_events: 0,
+            bubbles: 0,
             events: 0,
         }
     }
@@ -348,7 +359,7 @@ fn find_and_report_variant_preserving_shared_affixes<W: Write>(
                     has_changed |= true;
                     print(affix, out)?;
                     let shared_prefix_node = collapse(graph, affix, &mut del_subg);
-                    event_tracker.report(&affix.shared_prefix_nodes, shared_prefix_node);
+                    event_tracker.report(graph, &affix, shared_prefix_node);
                     queue.push_back(shared_prefix_node);
                     queue.push_back(shared_prefix_node.flip());
                 }
@@ -357,9 +368,10 @@ fn find_and_report_variant_preserving_shared_affixes<W: Write>(
     }
 
     log::info!(
-        "identified {} shared prefixes, {} of which were overlapping",
+        "identified {} shared prefixes, {} of which are overlapping, and {} of which are bubbles",
         event_tracker.events,
-        event_tracker.overlapping_events
+        event_tracker.overlapping_events,
+        event_tracker.bubbles
     );
     Ok(del_subg)
 }
