@@ -357,11 +357,23 @@ fn find_and_report_variant_preserving_shared_affixes<W: Write>(
                 let affixes = enumerate_variant_preserving_shared_affixes(graph, &del_subg, v)?;
                 for affix in affixes.iter() {
                     has_changed |= true;
-                    print(affix, out)?;
-                    let shared_prefix_node = collapse(graph, affix, &mut del_subg);
-                    event_tracker.report(graph, &affix, shared_prefix_node);
-                    queue.push_back(shared_prefix_node);
-                    queue.push_back(shared_prefix_node.flip());
+                    // in each iteration, the set of deleted nodes can change and affect the
+                    // subsequent iteration, so we need to check the status the node every time
+                    if affix
+                        .shared_prefix_nodes
+                        .iter()
+                        .chain(affix.parents.iter())
+                        .any(|u| del_subg.nodes.contains(u))
+                    {
+                        // push non-deleted parents back on queue
+                        queue.extend(affix.parents.iter().filter(|u| !del_subg.nodes.contains(u)));
+                    } else {
+                        print(affix, out)?;
+                        let shared_prefix_node = collapse(graph, affix, &mut del_subg);
+                        event_tracker.report(graph, &affix, shared_prefix_node);
+                        queue.push_back(shared_prefix_node);
+                        queue.push_back(shared_prefix_node.flip());
+                    }
                 }
             }
         }
