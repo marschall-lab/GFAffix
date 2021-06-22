@@ -1,18 +1,15 @@
 /* standard use */
 use rustc_hash::FxHashMap;
 use rustc_hash::FxHashSet;
-use std::error::Error;
 use std::collections::VecDeque;
+use std::error::Error;
 use std::fs;
 use std::io;
 use std::io::prelude::*;
 
 /* crate use */
 use clap::Clap;
-use gfa::{
-    gfa::{GFA},
-    parser::GFAParser,
-};
+use gfa::{gfa::GFA, parser::GFAParser};
 use handlegraph::{
     handle::{Direction, Edge, Handle},
     handlegraph::*,
@@ -24,9 +21,9 @@ use handlegraph::{
 #[clap(
     version = "0.1",
     author = "Daniel Doerr <daniel.doerr@hhu.de>",
-    about = "Identify shared suffixes/prefixes in multifurcaitons of the given graph.\n\n
-    Want log output? Call program with 'RUST_LOG=info gfaffix ...'\n 
-    Log output not informative enough? Call program with 'RUST_LOG=debug gfaffix..."
+    about = "Discover path-preserving shared prefixes in multifurcations of a given graph.\n
+    - Do you want log output? Call program with 'RUST_LOG=info gfaffix ...'
+    - Log output not informative enough? Try 'RUST_LOG=debug gfaffix ...'"
 )]
 pub struct Command {
     #[clap(index = 1, about = "graph in GFA1 format", required = true)]
@@ -35,7 +32,7 @@ pub struct Command {
     #[clap(
         short = 'o',
         long = "output_refined",
-        about = "output refined graph in GFA1 format",
+        about = "write refined graph in GFA1 format to supplied file",
         default_value = " "
     )]
     pub refined_graph_out: String,
@@ -56,7 +53,6 @@ pub struct DeletedSubGraph {
 
 impl DeletedSubGraph {
     fn add_edge(&mut self, u: Handle, v: Handle) {
-        
         let configurations = [(u, v), (v, u), (u.flip(), v.flip()), (v.flip(), u.flip())];
         self.edges.extend(&configurations);
         let e = configurations.iter().min().unwrap();
@@ -91,6 +87,33 @@ impl DeletedSubGraph {
         DeletedSubGraph {
             edges: FxHashSet::default(),
             nodes: FxHashSet::default(),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct CollapseEventTracker {
+    pub visited: FxHashSet<Handle>,
+    pub overlapping_events: usize,
+    pub events: usize,
+}
+
+impl CollapseEventTracker {
+    fn report(&mut self, shared_prefix_nodes: &Vec<Handle>, collapsed_prefix_node: Handle) {
+        self.events += 1;
+        for v in shared_prefix_nodes.iter() {
+            if self.visited.contains(v) {
+                self.overlapping_events += 1
+            }
+        }
+        self.visited.insert(collapsed_prefix_node);
+    }
+
+    fn new() -> Self {
+        CollapseEventTracker {
+            visited: FxHashSet::default(),
+            overlapping_events: 0,
+            events: 0,
         }
     }
 }
@@ -203,12 +226,17 @@ fn collapse(
     //  2. update deleted edge set, reassign outgoing edges of "empty" nodes to dedicated shared
     //     prefix node
     // there will be always a shared prefix node, so this condition is always true
-    let shared_prefix_node =shared_prefix_node_maybe.unwrap();
+    let shared_prefix_node = shared_prefix_node_maybe.unwrap();
     log::debug!(
         "node {}{} is dedicated shared prefix node",
-        if shared_prefix_node.is_reverse() { '<' } else { '>' },
-        usize::from(shared_prefix_node.id()));
-    
+        if shared_prefix_node.is_reverse() {
+            '<'
+        } else {
+            '>'
+        },
+        usize::from(shared_prefix_node.id())
+    );
+
     for (u, maybe_v) in splitted_node_pairs {
         if u != shared_prefix_node {
             // rewrire outgoing edges
@@ -299,6 +327,8 @@ fn find_and_report_variant_preserving_shared_affixes<W: Write>(
 ) -> Result<DeletedSubGraph, Box<dyn Error>> {
     let mut del_subg = DeletedSubGraph::new();
 
+    let mut event_tracker = CollapseEventTracker::new();
+
     let mut has_changed = true;
     while has_changed {
         has_changed = false;
@@ -318,6 +348,7 @@ fn find_and_report_variant_preserving_shared_affixes<W: Write>(
                     has_changed |= true;
                     print(affix, out)?;
                     let shared_prefix_node = collapse(graph, affix, &mut del_subg);
+                    event_tracker.report(&affix.shared_prefix_nodes, shared_prefix_node);
                     queue.push_back(shared_prefix_node);
                     queue.push_back(shared_prefix_node.flip());
                 }
@@ -325,6 +356,11 @@ fn find_and_report_variant_preserving_shared_affixes<W: Write>(
         }
     }
 
+    log::info!(
+        "identified {} shared prefixes, {} of which were overlapping",
+        event_tracker.events,
+        event_tracker.overlapping_events
+    );
     Ok(del_subg)
 }
 
