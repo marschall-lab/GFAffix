@@ -103,7 +103,7 @@ impl CollapseEventTracker {
     fn report(&mut self, graph: &HashGraph, affix: &AffixSubgraph, collapsed_prefix_node: Handle) {
         self.events += 1;
         let prefix_len = graph.sequence_vec(collapsed_prefix_node).len();
-        let is_bubble = affix
+        let is_bubble = !affix
             .shared_prefix_nodes
             .iter()
             .any(|v| graph.sequence_vec(*v).len() != prefix_len);
