@@ -100,8 +100,12 @@ pub struct CollapseEventTracker {
 }
 
 impl CollapseEventTracker {
-    fn report(&mut self, collapsed_prefix_node: Handle, shared_prefix_nodes: &Vec<Handle>,
-        splitted_node_pairs : &Vec<(Handle, Option<Handle>)>) {
+    fn report(
+        &mut self,
+        collapsed_prefix_node: Handle,
+        shared_prefix_nodes: &Vec<Handle>,
+        splitted_node_pairs: &Vec<(Handle, Option<Handle>)>,
+    ) {
         self.events += 1;
         let is_bubble = splitted_node_pairs.iter().all(|(_, x)| x.is_none());
         if is_bubble {
@@ -109,13 +113,15 @@ impl CollapseEventTracker {
         }
         for i in 0..shared_prefix_nodes.len() {
             let v = shared_prefix_nodes[i];
-            if self.transform.contains_key(&v) || (is_bubble && self.transform.contains_key(&v.flip())) {
+            if self.transform.contains_key(&v)
+                || (is_bubble && self.transform.contains_key(&v.flip()))
+            {
                 self.overlapping_events += 1
             }
 
             // record transformation of node, even if none took place (which is the case if node v
-            // equals the dedicated shared prefix node 
-            let mut replacement : Vec<Handle> = Vec::new();
+            // equals the dedicated shared prefix node
+            let mut replacement: Vec<Handle> = Vec::new();
             replacement.push(collapsed_prefix_node);
             if let Some(u) = splitted_node_pairs[i].1 {
                 replacement.push(u)
@@ -124,8 +130,8 @@ impl CollapseEventTracker {
             if is_bubble {
                 // if shared prefix is a bubble than also record the reverse complementary
                 // transformation
-                self.transform.insert(v.flip(), replacement.iter().map(|u|
-                        u.flip()).collect());
+                self.transform
+                    .insert(v.flip(), replacement.iter().map(|u| u.flip()).collect());
             }
         }
     }
@@ -205,19 +211,27 @@ fn collapse(
     graph: &mut HashGraph,
     shared_prefix: &AffixSubgraph,
     del_subg: &mut DeletedSubGraph,
-    event_tracker : &mut CollapseEventTracker
+    event_tracker: &mut CollapseEventTracker,
 ) -> Handle {
     let prefix_len = shared_prefix.sequence.len();
 
     // update graph in two passes:
     //  1. split nodes into shared prefix and distinct suffix and appoint dedicated shared
     //  prefix node
-    let mut shared_prefix_node_pos : usize = 0;
+    let mut shared_prefix_node_pos: usize = 0;
     let mut splitted_node_pairs: Vec<(Handle, Option<Handle>)> = Vec::new();
     for (i, v) in shared_prefix.shared_prefix_nodes.iter().enumerate() {
-        if graph.sequence_vec(*v).len() > prefix_len {
+        let v_len = graph.sequence_vec(*v).len();
+        if v_len > prefix_len {
             // x corresponds to the shared prefix,
-            let (x, u) = graph.split_handle(*v, prefix_len);
+            let (x, u) = if v.is_reverse() {
+                // apparently, there's a bug in rs-handlegraph that prevents splitting nodes in
+                // reverse direction
+                let (u_rev, x_rev) = graph.split_handle(v.flip(), v_len - prefix_len);
+                (x_rev.flip(), u_rev.flip())
+            } else {
+                graph.split_handle(*v, prefix_len)
+            };
             splitted_node_pairs.push((x, Some(u)));
             // update dedicated shared prefix node if none has been assigned yet
             log::debug!(
@@ -232,7 +246,7 @@ fn collapse(
         } else {
             // always use a node as dedicated shared prefix node if that node coincides with the
             // prefix
-            shared_prefix_node_pos = i; 
+            shared_prefix_node_pos = i;
             splitted_node_pairs.push((*v, None));
             log::debug!(
                 "node {}{} matches prefix {}",
@@ -314,8 +328,11 @@ fn collapse(
         }
     }
 
-    event_tracker.report(shared_prefix_node, &shared_prefix.shared_prefix_nodes,
-        &splitted_node_pairs);
+    event_tracker.report(
+        shared_prefix_node,
+        &shared_prefix.shared_prefix_nodes,
+        &splitted_node_pairs,
+    );
 
     shared_prefix_node
 }
@@ -381,8 +398,8 @@ fn find_and_report_variant_preserving_shared_affixes<W: Write>(
                         queue.extend(affix.parents.iter().filter(|u| !del_subg.nodes.contains(u)));
                     } else {
                         print(affix, out)?;
-                        let shared_prefix_node = collapse(graph, affix, &mut del_subg, &mut
-                            event_tracker);
+                        let shared_prefix_node =
+                            collapse(graph, affix, &mut del_subg, &mut event_tracker);
                         queue.push_back(shared_prefix_node);
                         queue.push_back(shared_prefix_node.flip());
                     }
