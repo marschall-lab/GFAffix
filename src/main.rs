@@ -103,7 +103,7 @@ impl CollapseEventTracker {
     fn report(&mut self, collapsed_prefix_node: Handle, shared_prefix_nodes: &Vec<Handle>,
         splitted_node_pairs : &Vec<(Handle, Option<Handle>)>) {
         self.events += 1;
-        let is_bubble = splitted_node_pairs.iter().all(|(_, x)| *x == None);
+        let is_bubble = splitted_node_pairs.iter().all(|(_, &x)| x == None);
         if is_bubble {
             self.bubbles += 1;
         }
@@ -113,21 +113,19 @@ impl CollapseEventTracker {
                 self.overlapping_events += 1
             }
 
-            // record transformation of node if any took place (which is not the case if node v
+            // record transformation of node, even if none took place (which is the case if node v
             // equals the dedicated shared prefix node 
-            if v != collapsed_prefix_node {
-                let mut replacement : Vec<Handle> = Vec::new();
-                replacement.push(collapsed_prefix_node);
-                if let Some(u) = splitted_node_pairs[i].1 {
-                    replacement.push(u)
-                }
-                self.transform.insert(v, replacement.clone());
-                if is_bubble {
-                    // if shared prefix is a bubble than also record the reverse complementary
-                    // transformation
-                    self.transform.insert(v.flip(), replacement.iter().map(|u|
-                            u.flip()).collect());
-                }
+            let mut replacement : Vec<Handle> = Vec::new();
+            replacement.push(collapsed_prefix_node);
+            if let Some(u) = splitted_node_pairs[i].1 {
+                replacement.push(u)
+            }
+            self.transform.insert(v, replacement.clone());
+            if is_bubble {
+                // if shared prefix is a bubble than also record the reverse complementary
+                // transformation
+                self.transform.insert(v.flip(), replacement.iter().map(|u|
+                        u.flip()).collect());
             }
         }
     }
