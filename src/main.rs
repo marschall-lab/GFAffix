@@ -160,7 +160,7 @@ fn enumerate_variant_preserving_shared_affixes(
                     .map(|v| format!(
                         "{}{}",
                         if v.is_reverse() { '<' } else { '>' },
-                        v.as_integer()
+                        v.unpack_number()
                     ))
                     .collect::<Vec<String>>()
                     .join(","),
@@ -169,7 +169,7 @@ fn enumerate_variant_preserving_shared_affixes(
                     .map(|v| format!(
                         "{}{}",
                         if v.is_reverse() { '<' } else { '>' },
-                        v.as_integer()
+                        v.unpack_number()
                     ))
                     .collect::<Vec<String>>()
                     .join(",")
@@ -215,11 +215,11 @@ fn collapse(
             log::debug!(
                 "splitting node {}{} into prefix {}{} and suffix {}{}",
                 if v.is_reverse() { '<' } else { '>' },
-                v.as_integer(),
+                v.unpack_number(),
                 if x.is_reverse() { '<' } else { '>' },
-                x.as_integer(),
+                x.unpack_number(),
                 if u.is_reverse() { '<' } else { '>' },
-                u.as_integer()
+                u.unpack_number()
             );
         } else {
             // always use a node as dedicated shared prefix node if that node coincides with the
@@ -229,7 +229,7 @@ fn collapse(
             log::debug!(
                 "node {}{} matches prefix {}",
                 if v.is_reverse() { '<' } else { '>' },
-                v.as_integer(),
+                v.unpack_number(),
                 &shared_prefix.sequence
             );
         }
@@ -246,7 +246,7 @@ fn collapse(
         } else {
             '>'
         },
-        shared_prefix_node.as_integer()
+        shared_prefix_node.unpack_number()
     );
 
     for (u, maybe_v) in splitted_node_pairs.iter() {
@@ -264,9 +264,9 @@ fn collapse(
                             } else {
                                 '>'
                             },
-                            shared_prefix_node.as_integer(),
+                            shared_prefix_node.unpack_number(),
                             if v.is_reverse() { '<' } else { '>' },
-                            v.as_integer()
+                            v.unpack_number()
                         );
                     }
                 }
@@ -288,9 +288,9 @@ fn collapse(
                                 } else {
                                     '>'
                                 },
-                                shared_prefix_node.as_integer(),
+                                shared_prefix_node.unpack_number(),
                                 if w.is_reverse() { '<' } else { '>' },
-                                w.as_integer()
+                                w.unpack_number()
                             );
                         }
                     }
@@ -300,7 +300,7 @@ fn collapse(
             log::debug!(
                 "flag {}{} as deleted",
                 if u.is_reverse() { '<' } else { '>' },
-                u.as_integer()
+                u.unpack_number()
             );
             del_subg.add(*u);
         }
@@ -357,7 +357,7 @@ fn find_and_report_variant_preserving_shared_affixes<W: Write>(
                 log::debug!(
                     "processing oriented node {}{}",
                     if v.is_reverse() { '<' } else { '>' },
-                    v.as_integer()
+                    v.unpack_number()
                 );
 
                 // process node in forward direction
@@ -403,7 +403,7 @@ fn print<W: io::Write>(affix: &AffixSubgraph, out: &mut io::BufWriter<W>) -> Res
             format!(
                 "{}{}",
                 if v.is_reverse() { '<' } else { '>' },
-                v.as_integer(),
+                v.unpack_number(),
             )
         })
         .collect();
@@ -414,7 +414,7 @@ fn print<W: io::Write>(affix: &AffixSubgraph, out: &mut io::BufWriter<W>) -> Res
             format!(
                 "{}{}",
                 if v.is_reverse() { '<' } else { '>' },
-                v.as_integer(),
+                v.unpack_number(),
             )
         })
         .collect();
@@ -439,23 +439,28 @@ fn print_active_subgraph<W: io::Write>(
             writeln!(
                 out,
                 "S\t{}\t{}",
-                v.as_integer(),
+                v.unpack_number(),
                 String::from_utf8(graph.sequence_vec(v))?
             )?;
         }
     }
 
-    for Edge(u, v) in graph.edges() {
+    for Edge(mut u, mut v) in graph.edges() {
+        if u.is_reverse() && v.is_reverse() { 
+            let w = u.flip();
+            u = v.flip();
+            v = w;
+        }
         if !del_subg.edge_deleted(&u, &v) {
             writeln!(
                 out,
                 "L\t{}\t{}\t{}\t{}\t0M",
-                u.as_integer(),
+                u.unpack_number(),
                 if u.is_reverse() { '-' } else { '+' },
-                v.as_integer(),
+                v.unpack_number(),
                 if v.is_reverse() { '-' } else { '+' }
             )?;
-        }
+        } 
     }
     Ok(())
 }
