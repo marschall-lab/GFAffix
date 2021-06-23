@@ -444,7 +444,12 @@ fn print_active_subgraph<W: io::Write>(
             )?;
         }
     }
-    for Edge(u, v) in graph.edges() {
+    for Edge(mut u, mut v) in graph.edges() {
+        if u.is_reverse() && v.is_reverse() { 
+            let w = u.flip();
+            u = v.flip();
+            v = w;
+        }
         if !del_subg.edge_deleted(&u, &v) {
             writeln!(
                 out,
