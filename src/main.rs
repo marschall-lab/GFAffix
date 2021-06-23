@@ -494,6 +494,9 @@ fn main() -> Result<(), io::Error> {
     )?;
     let res = find_and_report_variant_preserving_shared_affixes(&mut graph, &mut out);
 
+    if graph.has_edge(Handle::from_integer(184099), Handle::from_integer(461041).flip()) {
+        log::info!("graph still has edge >184099<461041");
+    }
     match res {
         Err(e) => panic!("gfaffix failed: {}", e),
         Ok(del_subg) => {
