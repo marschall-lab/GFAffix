@@ -506,7 +506,7 @@ fn main() -> Result<(), io::Error> {
     log::debug!(
         "neighbors of <184099: {}",
         graph
-            .neighbors(Handle::from_integer(184099).flip(), Direction::Right)
+            .neighbors(Handle::from_integer(184099).flip(), Direction::Left)
             .map(|v| format!(
                 "{}{}",
                 if v.is_reverse() { '<' } else { '>' },
