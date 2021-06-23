@@ -47,45 +47,24 @@ pub struct AffixSubgraph {
 
 #[derive(Clone, Debug)]
 pub struct DeletedSubGraph {
-    pub edges: FxHashSet<(Handle, Handle)>,
     pub nodes: FxHashSet<Handle>,
 }
 
 impl DeletedSubGraph {
-    fn add_edge(&mut self, u: Handle, v: Handle) {
-        let configurations = [(u, v), (v, u), (u.flip(), v.flip()), (v.flip(), u.flip())];
-        self.edges.extend(&configurations);
-        let e = configurations.iter().min().unwrap();
-        log::debug!(
-            "flag edge {}{}{}{} as deleted",
-            if e.0.is_reverse() { '<' } else { '>' },
-            usize::from(e.0.id()),
-            if e.1.is_reverse() { '<' } else { '>' },
-            usize::from(e.1.id())
-        );
+    fn add(&mut self, v: Handle) -> bool {
+        self.nodes.insert(v) | self.nodes.insert(v.flip())
     }
 
-    fn add_node(&mut self, v: Handle, graph: &HashGraph) -> bool {
-        let mut res = false;
-        res |= self.nodes.insert(v);
-        res |= self.nodes.insert(v.flip());
-
-        for u in graph.neighbors(v, Direction::Left) {
-            self.add_edge(u.flip(), v.flip());
-        }
-        for u in graph.neighbors(v, Direction::Right) {
-            self.add_edge(u, v);
-        }
-        res
+    fn edge_deleted(&self, u: &Handle, v: &Handle) -> bool {
+        self.nodes.contains(u) || self.nodes.contains(v)
     }
 
-    fn is_deleted(&self, u: &Handle, v: &Handle) -> bool {
-        self.edges.contains(&(*u, *v))
+    fn node_deleted(&self, v: &Handle) -> bool {
+        self.nodes.contains(v)
     }
 
     fn new() -> Self {
         DeletedSubGraph {
-            edges: FxHashSet::default(),
             nodes: FxHashSet::default(),
         }
     }
@@ -156,8 +135,8 @@ fn enumerate_variant_preserving_shared_affixes(
     let mut branch: FxHashMap<(u8, Vec<Handle>), Vec<Handle>> = FxHashMap::default();
     // traverse multifurcation in the forward direction of the handle
     for u in graph.neighbors(v, Direction::Right) {
-        if !del_subg.is_deleted(&v, &u) {
-            if del_subg.nodes.contains(&u) {
+        if !del_subg.edge_deleted(&v, &u) {
+            if del_subg.node_deleted(&u) {
                 panic!(
                     "node {} is deleted, but edge {}{}{}{} is still active",
                     usize::from(u.id()),
@@ -172,11 +151,11 @@ fn enumerate_variant_preserving_shared_affixes(
             // get parents of u
             let mut parents: Vec<Handle> = graph
                 .neighbors(u, Direction::Left)
-                .filter(|w| !del_subg.is_deleted(&u.flip(), &w.flip()))
+                .filter(|w| !del_subg.edge_deleted(&u.flip(), &w.flip()))
                 .collect();
             parents.sort();
             for w in parents.iter() {
-                if del_subg.nodes.contains(w) {
+                if del_subg.node_deleted(w) {
                     panic!(
                         "node {} is deleted, but edge {}{}{}{} is still active",
                         usize::from(w.id()),
@@ -320,7 +299,7 @@ fn collapse(
                     // node
                     let outgoing_edges: Vec<Handle> = graph
                         .neighbors(*u, Direction::Right)
-                        .filter(|v| !del_subg.is_deleted(&u, v))
+                        .filter(|v| !del_subg.edge_deleted(&u, v))
                         .collect();
                     for w in outgoing_edges {
                         if !graph.has_edge(shared_prefix_node, w) {
@@ -346,7 +325,7 @@ fn collapse(
                 if u.is_reverse() { '<' } else { '>' },
                 usize::from(u.id())
             );
-            del_subg.add_node(*u, &graph);
+            del_subg.add(*u);
         }
     }
 
@@ -397,7 +376,7 @@ fn find_and_report_variant_preserving_shared_affixes<W: Write>(
         let mut queue: VecDeque<Handle> = VecDeque::new();
         queue.extend(graph.handles().chain(graph.handles().map(|v| v.flip())));
         while let Some(v) = queue.pop_front() {
-            if !del_subg.nodes.contains(&v) {
+            if !del_subg.node_deleted(&v) {
                 log::debug!(
                     "processing oriented node {}{}",
                     if v.is_reverse() { '<' } else { '>' },
@@ -414,10 +393,10 @@ fn find_and_report_variant_preserving_shared_affixes<W: Write>(
                         .shared_prefix_nodes
                         .iter()
                         .chain(affix.parents.iter())
-                        .any(|u| del_subg.nodes.contains(u))
+                        .any(|u| del_subg.node_deleted(u))
                     {
                         // push non-deleted parents back on queue
-                        queue.extend(affix.parents.iter().filter(|u| !del_subg.nodes.contains(u)));
+                        queue.extend(affix.parents.iter().filter(|u| !del_subg.node_deleted(u)));
                     } else {
                         print(affix, out)?;
                         let shared_prefix_node =
@@ -479,7 +458,7 @@ fn print_active_subgraph<W: io::Write>(
     out: &mut io::BufWriter<W>,
 ) -> Result<(), Box<dyn Error>> {
     for v in graph.handles() {
-        if !del_subg.nodes.contains(&v) {
+        if !del_subg.node_deleted(&v) {
             writeln!(
                 out,
                 "S\t{}\t{}",
@@ -489,7 +468,7 @@ fn print_active_subgraph<W: io::Write>(
         }
     }
     for Edge(u, v) in graph.edges() {
-        if !del_subg.is_deleted(&u, &v) {
+        if !del_subg.edge_deleted(&u, &v) {
             writeln!(
                 out,
                 "L\t{}\t{}\t{}\t{}\t0M",
