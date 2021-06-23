@@ -501,7 +501,7 @@ fn main() -> Result<(), io::Error> {
         Handle::from_integer(184099).flip(),
         Handle::from_integer(184100),
     ) {
-        log::info!("graph has edge <184099>184100");
+        log::info!("graph has edge <184099>{}", usize::from(Handle::from_integer(184100).id()));
     }
     log::debug!(
         "right neighbors of >184099: {}",
