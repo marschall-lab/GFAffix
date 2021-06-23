@@ -444,27 +444,36 @@ fn print_active_subgraph<W: io::Write>(
             )?;
         }
     }
-    for Edge(mut u, mut v) in graph.edges() {
-        if u.is_reverse() && v.is_reverse() { 
-            let w = u.flip();
-            u = v.flip();
-            v = w;
-        }
-        if !del_subg.edge_deleted(&u, &v) {
-            writeln!(
-                out,
-                "L\t{}\t{}\t{}\t{}\t0M",
-                usize::from(u.id()),
-                if u.is_reverse() { '-' } else { '+' },
-                usize::from(v.id()),
-                if v.is_reverse() { '-' } else { '+' }
-            )?;
-        } else {
-            log::debug!("edge {}{}{}{} is flagged as deleted", 
-                if u.is_reverse() { '<' } else { '>' },
-                usize::from(u.id()),
-                if v.is_reverse() { '<' } else { '>' },
-                usize::from(v.id()));
+    
+    let mut visited : FxHashSet<Handle> = FxHashSet::default();
+    for x in graph.handles() {
+        for mut v in vec![x, x.flip()] {
+            for mut u in graph.neighbors(v, Direction::Right) {
+                if !visited.contains(&u) {
+                    if u.is_reverse() && v.is_reverse() { 
+                        let w = u.flip();
+                        u = v.flip();
+                        v = w;
+                    }
+                    if !del_subg.edge_deleted(&u, &v) {
+                        writeln!(
+                            out,
+                            "L\t{}\t{}\t{}\t{}\t0M",
+                            usize::from(u.id()),
+                            if u.is_reverse() { '-' } else { '+' },
+                            usize::from(v.id()),
+                            if v.is_reverse() { '-' } else { '+' }
+                        )?;
+                    } else {
+                        log::debug!("edge {}{}{}{} is flagged as deleted", 
+                            if u.is_reverse() { '<' } else { '>' },
+                            usize::from(u.id()),
+                            if v.is_reverse() { '<' } else { '>' },
+                            usize::from(v.id()));
+                    }
+                }
+            }
+            visited.insert(v);
         }
     }
     Ok(())
