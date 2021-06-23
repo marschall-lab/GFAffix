@@ -215,7 +215,7 @@ fn collapse(
     let mut shared_prefix_node_pos : usize = 0;
     let mut splitted_node_pairs: Vec<(Handle, Option<Handle>)> = Vec::new();
     for (i, v) in shared_prefix.shared_prefix_nodes.iter().enumerate() {
-        if graph.sequence_vec(*v).len() < prefix_len {
+        if graph.sequence_vec(*v).len() > prefix_len {
             // x corresponds to the shared prefix,
             let (x, u) = graph.split_handle(*v, prefix_len);
             splitted_node_pairs.push((x, Some(u)));
