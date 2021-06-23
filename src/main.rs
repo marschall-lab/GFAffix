@@ -135,37 +135,14 @@ fn enumerate_variant_preserving_shared_affixes(
     let mut branch: FxHashMap<(u8, Vec<Handle>), Vec<Handle>> = FxHashMap::default();
     // traverse multifurcation in the forward direction of the handle
     for u in graph.neighbors(v, Direction::Right) {
-        if !del_subg.edge_deleted(&v, &u) {
-            if del_subg.node_deleted(&u) {
-                panic!(
-                    "node {} is deleted, but edge {}{}{}{} is still active",
-                    usize::from(u.id()),
-                    if v.is_reverse() { '<' } else { '>' },
-                    usize::from(v.id()),
-                    if u.is_reverse() { '<' } else { '>' },
-                    usize::from(u.id())
-                )
-            }
+        if !del_subg.node_deleted(&u) {
             let seq = graph.sequence_vec(u);
-
             // get parents of u
             let mut parents: Vec<Handle> = graph
                 .neighbors(u, Direction::Left)
-                .filter(|w| !del_subg.edge_deleted(&u.flip(), &w.flip()))
+                .filter(|w| !del_subg.node_deleted(&w))
                 .collect();
             parents.sort();
-            for w in parents.iter() {
-                if del_subg.node_deleted(w) {
-                    panic!(
-                        "node {} is deleted, but edge {}{}{}{} is still active",
-                        usize::from(w.id()),
-                        if u.is_reverse() { '<' } else { '>' },
-                        usize::from(u.id()),
-                        if w.is_reverse() { '<' } else { '>' },
-                        usize::from(w.id())
-                    )
-                }
-            }
             // insert child in variant-preserving data structure
             branch
                 .entry((seq[0], parents))
