@@ -160,7 +160,7 @@ fn enumerate_variant_preserving_shared_affixes(
                     .map(|v| format!(
                         "{}{}",
                         if v.is_reverse() { '<' } else { '>' },
-                        usize::from(v.id())
+                        v.as_integer()
                     ))
                     .collect::<Vec<String>>()
                     .join(","),
@@ -169,7 +169,7 @@ fn enumerate_variant_preserving_shared_affixes(
                     .map(|v| format!(
                         "{}{}",
                         if v.is_reverse() { '<' } else { '>' },
-                        usize::from(v.id())
+                        v.as_integer()
                     ))
                     .collect::<Vec<String>>()
                     .join(",")
@@ -215,11 +215,11 @@ fn collapse(
             log::debug!(
                 "splitting node {}{} into prefix {}{} and suffix {}{}",
                 if v.is_reverse() { '<' } else { '>' },
-                usize::from(v.id()),
+                v.as_integer(),
                 if x.is_reverse() { '<' } else { '>' },
-                usize::from(x.id()),
+                x.as_integer(),
                 if u.is_reverse() { '<' } else { '>' },
-                usize::from(u.id())
+                u.as_integer()
             );
         } else {
             // always use a node as dedicated shared prefix node if that node coincides with the
@@ -229,7 +229,7 @@ fn collapse(
             log::debug!(
                 "node {}{} matches prefix {}",
                 if v.is_reverse() { '<' } else { '>' },
-                usize::from(v.id()),
+                v.as_integer(),
                 &shared_prefix.sequence
             );
         }
@@ -246,7 +246,7 @@ fn collapse(
         } else {
             '>'
         },
-        usize::from(shared_prefix_node.id())
+        shared_prefix_node.as_integer()
     );
 
     for (u, maybe_v) in splitted_node_pairs.iter() {
@@ -264,9 +264,9 @@ fn collapse(
                             } else {
                                 '>'
                             },
-                            usize::from(shared_prefix_node.id()),
+                            shared_prefix_node.as_integer(),
                             if v.is_reverse() { '<' } else { '>' },
-                            usize::from(v.id())
+                            v.as_integer()
                         );
                     }
                 }
@@ -288,9 +288,9 @@ fn collapse(
                                 } else {
                                     '>'
                                 },
-                                usize::from(shared_prefix_node.id()),
+                                shared_prefix_node.as_integer(),
                                 if w.is_reverse() { '<' } else { '>' },
-                                usize::from(w.id())
+                                w.as_integer()
                             );
                         }
                     }
@@ -300,7 +300,7 @@ fn collapse(
             log::debug!(
                 "flag {}{} as deleted",
                 if u.is_reverse() { '<' } else { '>' },
-                usize::from(u.id())
+                u.as_integer()
             );
             del_subg.add(*u);
         }
@@ -357,7 +357,7 @@ fn find_and_report_variant_preserving_shared_affixes<W: Write>(
                 log::debug!(
                     "processing oriented node {}{}",
                     if v.is_reverse() { '<' } else { '>' },
-                    usize::from(v.id())
+                    v.as_integer()
                 );
 
                 // process node in forward direction
@@ -403,7 +403,7 @@ fn print<W: io::Write>(affix: &AffixSubgraph, out: &mut io::BufWriter<W>) -> Res
             format!(
                 "{}{}",
                 if v.is_reverse() { '<' } else { '>' },
-                usize::from(v.id()),
+                v.as_integer(),
             )
         })
         .collect();
@@ -414,7 +414,7 @@ fn print<W: io::Write>(affix: &AffixSubgraph, out: &mut io::BufWriter<W>) -> Res
             format!(
                 "{}{}",
                 if v.is_reverse() { '<' } else { '>' },
-                usize::from(v.id()),
+                v.as_integer(),
             )
         })
         .collect();
@@ -439,43 +439,22 @@ fn print_active_subgraph<W: io::Write>(
             writeln!(
                 out,
                 "S\t{}\t{}",
-                usize::from(v.id()),
+                v.as_integer(),
                 String::from_utf8(graph.sequence_vec(v))?
             )?;
         }
     }
 
-    let mut visited: FxHashSet<Handle> = FxHashSet::default();
-    for x in graph.handles() {
-        for mut v in vec![x, x.flip()] {
-            for mut u in graph.neighbors(v, Direction::Right) {
-                if !visited.contains(&u) {
-                    if u.is_reverse() && v.is_reverse() {
-                        let w = u.flip();
-                        u = v.flip();
-                        v = w;
-                    }
-                    if !del_subg.edge_deleted(&u, &v) {
-                        writeln!(
-                            out,
-                            "L\t{}\t{}\t{}\t{}\t0M",
-                            usize::from(u.id()),
-                            if u.is_reverse() { '-' } else { '+' },
-                            usize::from(v.id()),
-                            if v.is_reverse() { '-' } else { '+' }
-                        )?;
-                    } else {
-                        log::debug!(
-                            "edge {}{}{}{} is flagged as deleted",
-                            if u.is_reverse() { '<' } else { '>' },
-                            usize::from(u.id()),
-                            if v.is_reverse() { '<' } else { '>' },
-                            usize::from(v.id())
-                        );
-                    }
-                }
-            }
-            visited.insert(v);
+    for Edge(u, v) in graph.edges() {
+        if !del_subg.edge_deleted(&u, &v) {
+            writeln!(
+                out,
+                "L\t{}\t{}\t{}\t{}\t0M",
+                u.as_integer(),
+                if u.is_reverse() { '-' } else { '+' },
+                v.as_integer(),
+                if v.is_reverse() { '-' } else { '+' }
+            )?;
         }
     }
     Ok(())
@@ -497,61 +476,6 @@ fn main() -> Result<(), io::Error> {
     log::info!("constructing handle graph");
     let mut graph = HashGraph::from_gfa(&gfa);
 
-    if graph.has_edge(
-        Handle::from_integer(184099).flip(),
-        Handle::from_integer(184100),
-    ) {
-        log::info!("graph has edge <184099>{}", Handle::from_integer(184100).as_integer());
-    }
-    log::debug!(
-        "right neighbors of >184099: {}",
-        graph
-            .neighbors(Handle::from_integer(184099), Direction::Right)
-            .map(|v| format!(
-                "{}{}",
-                if v.is_reverse() { '<' } else { '>' },
-                usize::from(v.id())
-            ))
-            .collect::<Vec<String>>()
-            .join(",")
-    );
-    log::debug!(
-        "left neighbors of >184099: {}",
-        graph
-            .neighbors(Handle::from_integer(184099), Direction::Left)
-            .map(|v| format!(
-                "{}{}",
-                if v.is_reverse() { '<' } else { '>' },
-                usize::from(v.id())
-            ))
-            .collect::<Vec<String>>()
-            .join(",")
-    );
-    log::debug!(
-        "right neighbors of <184099: {}",
-        graph
-            .neighbors(Handle::from_integer(184099).flip(), Direction::Right)
-            .map(|v| format!(
-                "{}{}",
-                if v.is_reverse() { '<' } else { '>' },
-                usize::from(v.id())
-            ))
-            .collect::<Vec<String>>()
-            .join(",")
-    );
-    log::debug!(
-        "left neighbors of <184099: {}",
-        graph
-            .neighbors(Handle::from_integer(184099).flip(), Direction::Left)
-            .map(|v| format!(
-                "{}{}",
-                if v.is_reverse() { '<' } else { '>' },
-                usize::from(v.id())
-            ))
-            .collect::<Vec<String>>()
-            .join(",")
-    );
-
     log::info!("identifying variant-preserving shared prefixes");
     writeln!(
         out,
@@ -566,24 +490,6 @@ fn main() -> Result<(), io::Error> {
     )?;
     let res = find_and_report_variant_preserving_shared_affixes(&mut graph, &mut out);
 
-    if graph.has_edge(
-        Handle::from_integer(184099).flip(),
-        Handle::from_integer(184100),
-    ) {
-        log::debug!("graph still has edge <184099>184100");
-    }
-    log::debug!(
-        "neighbors of <184099: {}",
-        graph
-            .neighbors(Handle::from_integer(184099).flip(), Direction::Right)
-            .map(|v| format!(
-                "{}{}",
-                if v.is_reverse() { '<' } else { '>' },
-                usize::from(v.id())
-            ))
-            .collect::<Vec<String>>()
-            .join(",")
-    );
     match res {
         Err(e) => panic!("gfaffix failed: {}", e),
         Ok(del_subg) => {
