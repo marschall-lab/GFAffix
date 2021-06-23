@@ -9,7 +9,10 @@ use std::io::prelude::*;
 
 /* crate use */
 use clap::Clap;
-use gfa::{gfa::GFA, parser::GFAParser};
+use gfa::{
+    gfa::{orientation::Orientation, Path, GFA},
+    parser::GFAParser,
+};
 use handlegraph::{
     handle::{Direction, Edge, Handle},
     handlegraph::*,
@@ -122,6 +125,20 @@ impl CollapseEventTracker {
             bubbles: 0,
             events: 0,
         }
+    }
+
+    fn get_canonized_transformation(&self) -> FxHashMap<Handle, Vec<Handle>> {
+        let mut res: FxHashMap<Handle, Vec<Handle>> = FxHashMap::default();
+        res.reserve(self.transform.len());
+
+        for (v, us) in self.transform.iter() {
+            if v.is_reverse() {
+                res.insert(v.flip(), us.iter().map(|u| u.flip()).rev().collect());
+            } else {
+                res.insert(*v, us.clone());
+            }
+        }
+        res
     }
 }
 
@@ -342,7 +359,7 @@ fn get_shared_prefix(
 fn find_and_report_variant_preserving_shared_affixes<W: Write>(
     graph: &mut HashGraph,
     out: &mut io::BufWriter<W>,
-) -> Result<DeletedSubGraph, Box<dyn Error>> {
+) -> Result<(DeletedSubGraph, CollapseEventTracker), Box<dyn Error>> {
     let mut del_subg = DeletedSubGraph::new();
 
     let mut event_tracker = CollapseEventTracker::new();
@@ -392,7 +409,47 @@ fn find_and_report_variant_preserving_shared_affixes<W: Write>(
         event_tracker.overlapping_events,
         event_tracker.bubbles
     );
-    Ok(del_subg)
+    Ok((del_subg, event_tracker))
+}
+
+fn transform_path(
+    path: &Path<usize, ()>,
+    transform: &FxHashMap<Handle, Vec<Handle>>,
+) -> Vec<(usize, Orientation)> {
+    let mut res: Vec<(usize, Orientation)> = Vec::new();
+
+    for (sid, o) in path.iter() {
+        let v = Handle::new(sid, Orientation::Forward);
+        match transform.get(&v) {
+            Some(us) => res.extend(
+                (match o {
+                    Orientation::Forward => us.clone(),
+                    Orientation::Backward => us.iter().rev().map(|u| u.flip()).collect(),
+                })
+                .iter()
+                .map(|u| {
+                    (
+                        u.unpack_number() as usize,
+                        if u.is_reverse() {
+                            Orientation::Backward
+                        } else {
+                            Orientation::Forward
+                        },
+                    )
+                }),
+            ),
+            None => res.push((
+                v.unpack_number() as usize,
+                if v.is_reverse() {
+                    Orientation::Backward
+                } else {
+                    Orientation::Forward
+                },
+            )),
+        }
+    }
+
+    res
 }
 
 fn print<W: io::Write>(affix: &AffixSubgraph, out: &mut io::BufWriter<W>) -> Result<(), io::Error> {
@@ -446,7 +503,7 @@ fn print_active_subgraph<W: io::Write>(
     }
 
     for Edge(mut u, mut v) in graph.edges() {
-        if u.is_reverse() && v.is_reverse() { 
+        if u.is_reverse() && v.is_reverse() {
             let w = u.flip();
             u = v.flip();
             v = w;
@@ -460,8 +517,34 @@ fn print_active_subgraph<W: io::Write>(
                 v.unpack_number(),
                 if v.is_reverse() { '-' } else { '+' }
             )?;
-        } 
+        }
     }
+    Ok(())
+}
+
+fn print_transformed_paths<W: io::Write>(
+    gfa: &GFA<usize, ()>,
+    transform: &FxHashMap<Handle, Vec<Handle>>,
+    out: &mut io::BufWriter<W>,
+) -> Result<(), Box<dyn Error>> {
+    for path in gfa.paths.iter() {
+        let tpath = transform_path(path, &transform);
+        writeln!(
+            out,
+            "P\t{}\t{}",
+            String::from_utf8(path.path_name.clone())?,
+            tpath
+                .iter()
+                .map(|(sid, o)| format!(
+                    "{}{}",
+                    sid,
+                    if *o == Orientation::Forward { '+' } else { '-' }
+                ))
+                .collect::<Vec<String>>()
+                .join(",")
+        )?;
+    }
+
     Ok(())
 }
 
@@ -497,7 +580,7 @@ fn main() -> Result<(), io::Error> {
 
     match res {
         Err(e) => panic!("gfaffix failed: {}", e),
-        Ok(del_subg) => {
+        Ok((del_subg, event_tracker)) => {
             if !params.refined_graph_out.trim().is_empty() {
                 let mut graph_out =
                     io::BufWriter::new(fs::File::create(params.refined_graph_out.clone())?);
@@ -508,6 +591,14 @@ fn main() -> Result<(), io::Error> {
                         e
                     );
                 }
+                let transform = event_tracker.get_canonized_transformation();
+                if let Err(e) = print_transformed_paths(&gfa, &transform, &mut graph_out) {
+                    panic!(
+                        "unable to write refined graph paths to {}: {}",
+                        params.refined_graph_out.clone(),
+                        e
+                    );
+                };
             }
         }
     }
