@@ -57,7 +57,7 @@ impl DeletedSubGraph {
         self.edges.extend(&configurations);
         let e = configurations.iter().min().unwrap();
         log::debug!(
-            "flag edge {}{}-{}{} as deleted",
+            "flag edge {}{}{}{} as deleted",
             if e.0.is_reverse() { '<' } else { '>' },
             usize::from(e.0.id()),
             if e.1.is_reverse() { '<' } else { '>' },
@@ -157,6 +157,16 @@ fn enumerate_variant_preserving_shared_affixes(
     // traverse multifurcation in the forward direction of the handle
     for u in graph.neighbors(v, Direction::Right) {
         if !del_subg.is_deleted(&v, &u) {
+            if del_subg.nodes.contains(&u) {
+                panic!(
+                    "node {} is deleted, but edge {}{}{}{} is still active",
+                    usize::from(u.id()),
+                    if v.is_reverse() { '<' } else { '>' },
+                    usize::from(v.id()),
+                    if u.is_reverse() { '<' } else { '>' },
+                    usize::from(u.id())
+                )
+            }
             let seq = graph.sequence_vec(u);
 
             // get parents of u
@@ -165,6 +175,18 @@ fn enumerate_variant_preserving_shared_affixes(
                 .filter(|w| !del_subg.is_deleted(&u.flip(), &w.flip()))
                 .collect();
             parents.sort();
+            for w in parents.iter() {
+                if del_subg.nodes.contains(w) {
+                    panic!(
+                        "node {} is deleted, but edge {}{}{}{} is still active",
+                        usize::from(w.id()),
+                        if u.is_reverse() { '<' } else { '>' },
+                        usize::from(u.id()),
+                        if w.is_reverse() { '<' } else { '>' },
+                        usize::from(w.id())
+                    )
+                }
+            }
             // insert child in variant-preserving data structure
             branch
                 .entry((seq[0], parents))
@@ -280,7 +302,7 @@ fn collapse(
                     if !graph.has_edge(shared_prefix_node, *v) {
                         graph.create_edge(Edge(shared_prefix_node, *v));
                         log::debug!(
-                            "create edge {}{}-{}{}",
+                            "create edge {}{}{}{}",
                             if shared_prefix_node.is_reverse() {
                                 '<'
                             } else {
@@ -304,7 +326,7 @@ fn collapse(
                         if !graph.has_edge(shared_prefix_node, w) {
                             graph.create_edge(Edge(shared_prefix_node, w));
                             log::debug!(
-                                "create edge {}{}-{}{}",
+                                "create edge {}{}{}{}",
                                 if shared_prefix_node.is_reverse() {
                                     '<'
                                 } else {
