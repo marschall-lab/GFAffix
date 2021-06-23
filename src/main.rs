@@ -503,6 +503,18 @@ fn main() -> Result<(), io::Error> {
     ) {
         log::info!("graph has edge <184099>184100");
     }
+    log::debug!(
+        "neighbors of <184099: {}",
+        graph
+            .neighbors(Handle::from_integer(184099).flip(), Direction::Right)
+            .map(|v| format!(
+                "{}{}",
+                if v.is_reverse() { '<' } else { '>' },
+                usize::from(v.id())
+            ))
+            .collect::<Vec<String>>()
+            .join(",")
+    );
 
     log::info!("identifying variant-preserving shared prefixes");
     writeln!(
