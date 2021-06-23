@@ -480,6 +480,10 @@ fn main() -> Result<(), io::Error> {
     log::info!("constructing handle graph");
     let mut graph = HashGraph::from_gfa(&gfa);
 
+    if graph.has_edge(Handle::from_integer(184099).flip(), Handle::from_integer(184100)) {
+        log::info!("graph has edge <184099>184100");
+    }
+
     log::info!("identifying variant-preserving shared prefixes");
     writeln!(
         out,
@@ -494,8 +498,8 @@ fn main() -> Result<(), io::Error> {
     )?;
     let res = find_and_report_variant_preserving_shared_affixes(&mut graph, &mut out);
 
-    if graph.has_edge(Handle::from_integer(184099), Handle::from_integer(461041).flip()) {
-        log::info!("graph still has edge >184099<461041");
+    if graph.has_edge(Handle::from_integer(184099).flip(), Handle::from_integer(184100)) {
+        log::info!("graph still has edge <184099>184100");
     }
     match res {
         Err(e) => panic!("gfaffix failed: {}", e),
