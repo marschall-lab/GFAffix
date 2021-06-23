@@ -459,6 +459,12 @@ fn print_active_subgraph<W: io::Write>(
                 usize::from(v.id()),
                 if v.is_reverse() { '-' } else { '+' }
             )?;
+        } else {
+            log::debug!("edge {}{}{}{} is flagged as deleted", 
+                if u.is_reverse() { '<' } else { '>' },
+                usize::from(u.id()),
+                if v.is_reverse() { '<' } else { '>' },
+                usize::from(v.id()));
         }
     }
     Ok(())
