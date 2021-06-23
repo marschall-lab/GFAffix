@@ -103,7 +103,7 @@ impl CollapseEventTracker {
     fn report(&mut self, collapsed_prefix_node: Handle, shared_prefix_nodes: &Vec<Handle>,
         splitted_node_pairs : &Vec<(Handle, Option<Handle>)>) {
         self.events += 1;
-        let is_bubble = splitted_node_pairs.iter().all(|(_, x)| &x == None);
+        let is_bubble = splitted_node_pairs.iter().all(|(_, x)| *x == None);
         if is_bubble {
             self.bubbles += 1;
         }
