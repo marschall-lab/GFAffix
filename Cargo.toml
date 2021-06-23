@@ -10,8 +10,8 @@ edition = "2018"
 bstr       = "0.2" 
 clap        = "3.0.0-beta.2"
 rustc-hash = "1"
-handlegraph = "0.6.0"
-gfa         = "0.9"
+handlegraph = "0.7.0-alpha.7"
+gfa         = "0.10"
 
 # Logging and error management
 log        = "0.4"
