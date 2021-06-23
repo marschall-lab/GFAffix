@@ -444,13 +444,13 @@ fn print_active_subgraph<W: io::Write>(
             )?;
         }
     }
-    
-    let mut visited : FxHashSet<Handle> = FxHashSet::default();
+
+    let mut visited: FxHashSet<Handle> = FxHashSet::default();
     for x in graph.handles() {
         for mut v in vec![x, x.flip()] {
             for mut u in graph.neighbors(v, Direction::Right) {
                 if !visited.contains(&u) {
-                    if u.is_reverse() && v.is_reverse() { 
+                    if u.is_reverse() && v.is_reverse() {
                         let w = u.flip();
                         u = v.flip();
                         v = w;
@@ -465,11 +465,13 @@ fn print_active_subgraph<W: io::Write>(
                             if v.is_reverse() { '-' } else { '+' }
                         )?;
                     } else {
-                        log::debug!("edge {}{}{}{} is flagged as deleted", 
+                        log::debug!(
+                            "edge {}{}{}{} is flagged as deleted",
                             if u.is_reverse() { '<' } else { '>' },
                             usize::from(u.id()),
                             if v.is_reverse() { '<' } else { '>' },
-                            usize::from(v.id()));
+                            usize::from(v.id())
+                        );
                     }
                 }
             }
@@ -495,7 +497,10 @@ fn main() -> Result<(), io::Error> {
     log::info!("constructing handle graph");
     let mut graph = HashGraph::from_gfa(&gfa);
 
-    if graph.has_edge(Handle::from_integer(184099).flip(), Handle::from_integer(184100)) {
+    if graph.has_edge(
+        Handle::from_integer(184099).flip(),
+        Handle::from_integer(184100),
+    ) {
         log::info!("graph has edge <184099>184100");
     }
 
@@ -513,9 +518,24 @@ fn main() -> Result<(), io::Error> {
     )?;
     let res = find_and_report_variant_preserving_shared_affixes(&mut graph, &mut out);
 
-    if graph.has_edge(Handle::from_integer(184099).flip(), Handle::from_integer(184100)) {
-        log::info!("graph still has edge <184099>184100");
+    if graph.has_edge(
+        Handle::from_integer(184099).flip(),
+        Handle::from_integer(184100),
+    ) {
+        log::debug!("graph still has edge <184099>184100");
     }
+    log::debug!(
+        "neighbors of <184099: {}",
+        graph
+            .neighbors(Handle::from_integer(184099).flip(), Direction::Right)
+            .map(|v| format!(
+                "{}{}",
+                if v.is_reverse() { '<' } else { '>' },
+                usize::from(v.id())
+            ))
+            .collect::<Vec<String>>()
+            .join(",")
+    );
     match res {
         Err(e) => panic!("gfaffix failed: {}", e),
         Ok(del_subg) => {
