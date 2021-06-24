@@ -534,7 +534,7 @@ fn print_transformed_paths<W: io::Write>(
         let tpath = transform_path(&path.iter().collect(), &transform);
         writeln!(
             out,
-            "P\t{}\t{}",
+            "P\t{}\t{}\t*",
             str::from_utf8(&path.path_name)?,
             tpath
                 .iter()
