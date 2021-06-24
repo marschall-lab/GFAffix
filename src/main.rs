@@ -460,25 +460,32 @@ fn check_path(graph: &HashGraph, del_subg: &DeletedSubGraph, path: &Vec<(usize, 
         let u = Handle::new(path[i].0, path[i].1);
         let v = Handle::new(path[j].0, path[j].1);
 
-        if !graph.has_edge(u, v) {
+//        if !graph.has_edge(u, v) {
+//            panic!(
+//                "edge {}{}{}{} is not part of the graph",
+//                if u.is_reverse() { '<' } else { '>' },
+//                u.unpack_number(),
+//                if v.is_reverse() { '<' } else { '>' },
+//                v.unpack_number()
+//            );
+//        } else if del_subg.edge_deleted(&u, &v) {
+//            panic!(
+//                "edge {}{}{}{} is deleted",
+//                if u.is_reverse() { '<' } else { '>' },
+//                u.unpack_number(),
+//                if v.is_reverse() { '<' } else { '>' },
+//                v.unpack_number()
+//            );
+//        }
+        if del_subg.node_deleted(&u) || del_subg.node_deleted(&v) {
             panic!(
-                "edge {}{}{}{} is not part of the graph",
-                if u.is_reverse() { '<' } else { '>' },
-                u.unpack_number(),
-                if v.is_reverse() { '<' } else { '>' },
-                v.unpack_number()
-            );
-        } else if del_subg.edge_deleted(&u, &v) {
-            panic!(
-                "edge {}{}{}{} is deleted",
+                "either node {}{} or {}{} or both are deleted",
                 if u.is_reverse() { '<' } else { '>' },
                 u.unpack_number(),
                 if v.is_reverse() { '<' } else { '>' },
                 v.unpack_number()
             );
         }
-
- 
     }
 }
 
