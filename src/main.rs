@@ -130,15 +130,41 @@ impl CollapseEventTracker {
     }
 
     fn get_canonized_transformation(&self) -> FxHashMap<Handle, Vec<Handle>> {
-        let mut res: FxHashMap<Handle, Vec<Handle>> = FxHashMap::default();
-        res.reserve(self.transform.len());
+        let mut oriented_transmap: FxHashMap<Handle, Vec<Handle>> = FxHashMap::default();
+        oriented_transmap.reserve(self.transform.len());
 
         for (v, us) in self.transform.iter() {
             if v.is_reverse() {
-                res.insert(v.flip(), us.iter().map(|u| u.flip()).rev().collect());
+                oriented_transmap.insert(v.flip(), us.iter().map(|u| u.flip()).rev().collect());
             } else {
-                res.insert(*v, us.clone());
+                oriented_transmap.insert(*v, us.clone());
             }
+        }
+
+        let mut res : FxHashMap<Handle, Vec<Handle>> = FxHashMap::default();
+        res.reserve(self.transform.len());
+
+        for (v, us) in oriented_transmap.iter()  {
+            let mut expanded_us : Vec<Handle> = Vec::new();
+            let mut queue : VecDeque<Handle> = VecDeque::new();
+            queue.extend(us.clone());
+
+            while let Some(v) = queue.pop_front() {
+                if v.is_reverse() && oriented_transmap.contains_key(&v.flip()) {
+                    // because the sequence is reversed, the last element must come first and vice
+                    // versa...
+                    for w in oriented_transmap.get(&v.flip()).unwrap() {
+                        queue.push_front(w.flip())
+                    } 
+                } else if oriented_transmap.contains_key(&v) {
+                    for w in oriented_transmap.get(&v).unwrap().iter().rev() {
+                        queue.push_front(*w);
+                    }
+                } else {
+                    expanded_us.push(v);
+                }
+            }
+            res.insert(*v, expanded_us);
         }
         res
     }
