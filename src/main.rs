@@ -5,12 +5,14 @@ use std::collections::VecDeque;
 use std::error::Error;
 use std::fs;
 use std::io;
+use std::str::{self, FromStr};
 use std::io::prelude::*;
+use quick_csv::Csv;
 
 /* crate use */
 use clap::Clap;
 use gfa::{
-    gfa::{orientation::Orientation, Path, GFA},
+    gfa::{orientation::Orientation, GFA},
     parser::GFAParser,
 };
 use handlegraph::{
@@ -413,13 +415,13 @@ fn find_and_report_variant_preserving_shared_affixes<W: Write>(
 }
 
 fn transform_path(
-    path: &Path<usize, ()>,
+    path: &Vec<(usize, Orientation)>,
     transform: &FxHashMap<Handle, Vec<Handle>>,
 ) -> Vec<(usize, Orientation)> {
     let mut res: Vec<(usize, Orientation)> = Vec::new();
 
     for (sid, o) in path.iter() {
-        let v = Handle::new(sid, Orientation::Forward);
+        let v = Handle::new(*sid, Orientation::Forward);
         match transform.get(&v) {
             Some(us) => res.extend(
                 (match o {
@@ -528,11 +530,12 @@ fn print_transformed_paths<W: io::Write>(
     out: &mut io::BufWriter<W>,
 ) -> Result<(), Box<dyn Error>> {
     for path in gfa.paths.iter() {
-        let tpath = transform_path(path, &transform);
+        log::debug!("transforming path {}", str::from_utf8(&path.path_name)?);
+        let tpath = transform_path(&path.iter().collect(), &transform);
         writeln!(
             out,
             "P\t{}\t{}",
-            String::from_utf8(path.path_name.clone())?,
+            str::from_utf8(&path.path_name)?,
             tpath
                 .iter()
                 .map(|(sid, o)| format!(
@@ -547,6 +550,81 @@ fn print_transformed_paths<W: io::Write>(
 
     Ok(())
 }
+
+fn parse_and_transform_walks<W: io::Write, R: io::Read>(
+    mut data : io::BufReader<R>, 
+    transform: &FxHashMap<Handle, Vec<Handle>>,
+    out: &mut io::BufWriter<W>,
+) -> Result<(), Box<dyn Error>> {
+
+    let reader = Csv::from_reader(&mut data)
+        .delimiter(b'\t')
+        .has_header(false);
+
+    for row in reader.into_iter() {
+        let row = row.unwrap();
+        let mut row_it = row.bytes_columns();
+
+        if &[b'W'] == row_it.next().unwrap()  {
+            let sample_id = str::from_utf8(row_it.next().unwrap())?;
+            let hap_idx   = str::from_utf8(row_it.next().unwrap())?;
+            let seq_id    = str::from_utf8(row_it.next().unwrap())?;
+            let seq_start = str::from_utf8(row_it.next().unwrap())?;
+            let seq_end   = str::from_utf8(row_it.next().unwrap())?;
+            let walk_ident = format!("{}#{}#{}:{}-{}", sample_id, hap_idx, seq_id, seq_start,
+                seq_end);
+            log::debug!("transforming walk {}", walk_ident);
+          
+            let walk_data = row_it.next().unwrap();
+            let mut walk : Vec<(usize, Orientation)> = Vec::new();
+
+            let mut cur_el : Vec<u8> = Vec::new();
+            for c in walk_data {
+                if (c == &b'>' || c == &b'<') && !cur_el.is_empty() {
+                    let sid = usize::from_str(str::from_utf8(&cur_el[1..])?)?;
+                    let o = match cur_el[0] {
+                        b'>' => Orientation::Forward,
+                        b'<' => Orientation::Backward,
+                        _ => panic!("unknown orientation '{}' of segment {} in walk {}", cur_el[0],
+                            sid, walk_ident)
+                    };
+                    walk.push((sid, o));
+                }
+                cur_el.push(*c);
+            }
+
+            if !cur_el.is_empty() {
+                let sid = usize::from_str(str::from_utf8(&cur_el[1..])?)?;
+                let o = match cur_el[0] {
+                    b'>' => Orientation::Forward,
+                    b'<' => Orientation::Backward,
+                    _ => panic!("unknown orientation '{}' of segment {} in walk {}", cur_el[0],
+                        sid, walk_ident)
+                };
+                walk.push((sid, o));
+            }
+
+            let tpath = transform_path(&walk, &transform);
+            writeln!(
+                out,
+                "W\t{}\t{}\t{}\t{}\t{}\t{}",
+                sample_id, hap_idx, seq_id, seq_start, seq_end,
+                tpath
+                    .iter()
+                    .map(|(sid, o)| format!(
+                        "{}{}",
+                        if *o == Orientation::Forward { '>' } else { '<' },
+                        sid
+                    ))
+                    .collect::<Vec<String>>()
+                    .join("")
+            )?;
+        }
+    }
+
+    Ok(())
+}
+
 
 fn main() -> Result<(), io::Error> {
     env_logger::init();
@@ -599,6 +677,14 @@ fn main() -> Result<(), io::Error> {
                         e
                     );
                 };
+                let data = io::BufReader::new(fs::File::open(&params.graph)?);
+                if let Err(e) = parse_and_transform_walks(data, &transform, &mut graph_out) {
+                    panic!(
+                        "unable to parse or write refined graph walks to {}: {}",
+                        params.refined_graph_out.clone(),
+                        e
+                    );
+                }
             }
         }
     }
