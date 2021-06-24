@@ -12,6 +12,7 @@ clap        = "3.0.0-beta.2"
 rustc-hash = "1"
 handlegraph = "0.7.0-alpha.7"
 gfa         = "0.10"
+quick-csv  = "0.1.6"
 
 # Logging and error management
 log        = "0.4"
