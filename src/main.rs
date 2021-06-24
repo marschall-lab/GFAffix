@@ -129,8 +129,8 @@ impl CollapseEventTracker {
                 match us.iter().position(|&u| u == v) {
                     Some(p) => {
                         us.remove(p);
-                        for (j, r) in replacement.iter().enumerate().rev() {
-                            us.insert(p+j, *r); 
+                        for r in replacement.iter().rev() {
+                            us.insert(p, *r); 
                         }
                     },
                     None => panic!("cannot replace an {}, because it no longer exists",
