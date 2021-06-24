@@ -1,13 +1,13 @@
 /* standard use */
+use quick_csv::Csv;
 use rustc_hash::FxHashMap;
 use rustc_hash::FxHashSet;
 use std::collections::VecDeque;
 use std::error::Error;
 use std::fs;
 use std::io;
-use std::str::{self, FromStr};
 use std::io::prelude::*;
-use quick_csv::Csv;
+use std::str::{self, FromStr};
 
 /* crate use */
 use clap::Clap;
@@ -454,6 +454,24 @@ fn transform_path(
     res
 }
 
+fn check_path(graph: &HashGraph, del_subg: &DeletedSubGraph, path: &Vec<(usize, Orientation)>) {
+    for j in 1..path.len() {
+        let i = j - 1;
+        let u = Handle::new(path[i].0, path[i].1);
+        let v = Handle::new(path[j].0, path[j].1);
+
+        if !graph.has_edge(u, v) || del_subg.edge_deleted(&u, &v) {
+            panic!(
+                "edge {}{}{}{} is deleted",
+                if u.is_reverse() { '<' } else { '>' },
+                u.unpack_number(),
+                if v.is_reverse() { '<' } else { '>' },
+                v.unpack_number()
+            );
+        }
+    }
+}
+
 fn print<W: io::Write>(affix: &AffixSubgraph, out: &mut io::BufWriter<W>) -> Result<(), io::Error> {
     let parents: Vec<String> = affix
         .parents
@@ -526,12 +544,15 @@ fn print_active_subgraph<W: io::Write>(
 
 fn print_transformed_paths<W: io::Write>(
     gfa: &GFA<usize, ()>,
+    graph: &HashGraph,
     transform: &FxHashMap<Handle, Vec<Handle>>,
+    del_subg: &DeletedSubGraph,
     out: &mut io::BufWriter<W>,
 ) -> Result<(), Box<dyn Error>> {
     for path in gfa.paths.iter() {
         log::debug!("transforming path {}", str::from_utf8(&path.path_name)?);
         let tpath = transform_path(&path.iter().collect(), &transform);
+        check_path(graph, del_subg, &tpath);
         writeln!(
             out,
             "P\t{}\t{}\t*",
@@ -552,11 +573,12 @@ fn print_transformed_paths<W: io::Write>(
 }
 
 fn parse_and_transform_walks<W: io::Write, R: io::Read>(
-    mut data : io::BufReader<R>, 
+    mut data: io::BufReader<R>,
+    graph: &HashGraph,
     transform: &FxHashMap<Handle, Vec<Handle>>,
+    del_subg: &DeletedSubGraph,
     out: &mut io::BufWriter<W>,
 ) -> Result<(), Box<dyn Error>> {
-
     let reader = Csv::from_reader(&mut data)
         .delimiter(b'\t')
         .flexible(true)
@@ -566,28 +588,32 @@ fn parse_and_transform_walks<W: io::Write, R: io::Read>(
         let row = row.unwrap();
         let mut row_it = row.bytes_columns();
 
-        if &[b'W'] == row_it.next().unwrap()  {
+        if &[b'W'] == row_it.next().unwrap() {
             let sample_id = str::from_utf8(row_it.next().unwrap())?;
-            let hap_idx   = str::from_utf8(row_it.next().unwrap())?;
-            let seq_id    = str::from_utf8(row_it.next().unwrap())?;
+            let hap_idx = str::from_utf8(row_it.next().unwrap())?;
+            let seq_id = str::from_utf8(row_it.next().unwrap())?;
             let seq_start = str::from_utf8(row_it.next().unwrap())?;
-            let seq_end   = str::from_utf8(row_it.next().unwrap())?;
-            let walk_ident = format!("{}#{}#{}:{}-{}", sample_id, hap_idx, seq_id, seq_start,
-                seq_end);
+            let seq_end = str::from_utf8(row_it.next().unwrap())?;
+            let walk_ident = format!(
+                "{}#{}#{}:{}-{}",
+                sample_id, hap_idx, seq_id, seq_start, seq_end
+            );
             log::debug!("transforming walk {}", walk_ident);
-          
-            let walk_data = row_it.next().unwrap();
-            let mut walk : Vec<(usize, Orientation)> = Vec::new();
 
-            let mut cur_el : Vec<u8> = Vec::new();
+            let walk_data = row_it.next().unwrap();
+            let mut walk: Vec<(usize, Orientation)> = Vec::new();
+
+            let mut cur_el: Vec<u8> = Vec::new();
             for c in walk_data {
                 if (c == &b'>' || c == &b'<') && !cur_el.is_empty() {
                     let sid = usize::from_str(str::from_utf8(&cur_el[1..])?)?;
                     let o = match cur_el[0] {
                         b'>' => Orientation::Forward,
                         b'<' => Orientation::Backward,
-                        _ => panic!("unknown orientation '{}' of segment {} in walk {}", cur_el[0],
-                            sid, walk_ident)
+                        _ => panic!(
+                            "unknown orientation '{}' of segment {} in walk {}",
+                            cur_el[0], sid, walk_ident
+                        ),
                     };
                     walk.push((sid, o));
                     cur_el.clear();
@@ -600,17 +626,24 @@ fn parse_and_transform_walks<W: io::Write, R: io::Read>(
                 let o = match cur_el[0] {
                     b'>' => Orientation::Forward,
                     b'<' => Orientation::Backward,
-                    _ => panic!("unknown orientation '{}' of segment {} in walk {}", cur_el[0],
-                        sid, walk_ident)
+                    _ => panic!(
+                        "unknown orientation '{}' of segment {} in walk {}",
+                        cur_el[0], sid, walk_ident
+                    ),
                 };
                 walk.push((sid, o));
             }
 
             let tpath = transform_path(&walk, &transform);
+            check_path(graph, del_subg, &tpath);
             writeln!(
                 out,
                 "W\t{}\t{}\t{}\t{}\t{}\t{}",
-                sample_id, hap_idx, seq_id, seq_start, seq_end,
+                sample_id,
+                hap_idx,
+                seq_id,
+                seq_start,
+                seq_end,
                 tpath
                     .iter()
                     .map(|(sid, o)| format!(
@@ -626,7 +659,6 @@ fn parse_and_transform_walks<W: io::Write, R: io::Read>(
 
     Ok(())
 }
-
 
 fn main() -> Result<(), io::Error> {
     env_logger::init();
@@ -672,7 +704,9 @@ fn main() -> Result<(), io::Error> {
                     );
                 }
                 let transform = event_tracker.get_canonized_transformation();
-                if let Err(e) = print_transformed_paths(&gfa, &transform, &mut graph_out) {
+                if let Err(e) =
+                    print_transformed_paths(&gfa, &graph, &transform, &del_subg, &mut graph_out)
+                {
                     panic!(
                         "unable to write refined graph paths to {}: {}",
                         params.refined_graph_out.clone(),
@@ -680,7 +714,9 @@ fn main() -> Result<(), io::Error> {
                     );
                 };
                 let data = io::BufReader::new(fs::File::open(&params.graph)?);
-                if let Err(e) = parse_and_transform_walks(data, &transform, &mut graph_out) {
+                if let Err(e) =
+                    parse_and_transform_walks(data, &graph, &transform, &del_subg, &mut graph_out)
+                {
                     panic!(
                         "unable to parse or write refined graph walks to {}: {}",
                         params.refined_graph_out.clone(),
