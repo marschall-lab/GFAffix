@@ -141,29 +141,73 @@ impl CollapseEventTracker {
             }
         }
 
-        let mut res : FxHashMap<Handle, Vec<Handle>> = FxHashMap::default();
+        let mut res: FxHashMap<Handle, Vec<Handle>> = FxHashMap::default();
         res.reserve(self.transform.len());
 
-        for (v, us) in oriented_transmap.iter()  {
-            let mut expanded_us : Vec<Handle> = Vec::new();
-            let mut queue : VecDeque<Handle> = VecDeque::new();
+        for (v, us) in oriented_transmap.iter() {
+            let mut expanded_us: Vec<Handle> = Vec::new();
+            let mut queue: VecDeque<Handle> = VecDeque::new();
             queue.extend(us.clone());
 
+            log::debug!("deep-expansion of node {}:", v.unpack_number());
             while let Some(v) = queue.pop_front() {
+                let msg = format!(">{} is replaced by ", v.unpack_number());
                 if v.is_reverse() && oriented_transmap.contains_key(&v.flip()) {
+                    let ws = oriented_transmap.get(&v.flip()).unwrap();
                     // because the sequence is reversed, the last element must come first and vice
                     // versa...
-                    for w in oriented_transmap.get(&v.flip()).unwrap() {
+                    log::debug!(
+                        "{}{}",
+                        msg,
+                        ws.iter()
+                            .rev()
+                            .map(|w| format!(
+                                "{}{}",
+                                if w.flip().is_reverse() { '<' } else { '>' },
+                                w.unpack_number()
+                            ))
+                            .collect::<Vec<String>>()
+                            .join("")
+                    );
+                    for w in ws {
                         queue.push_front(w.flip())
-                    } 
+                    }
                 } else if oriented_transmap.contains_key(&v) {
-                    for w in oriented_transmap.get(&v).unwrap().iter().rev() {
+                    let ws = oriented_transmap.get(&v).unwrap();
+                    log::debug!(
+                        "{}{}",
+                        msg,
+                        ws.iter()
+                            .map(|w| format!(
+                                "{}{}",
+                                if w.is_reverse() { '<' } else { '>' },
+                                w.unpack_number()
+                            ))
+                            .collect::<Vec<String>>()
+                            .join("")
+                    );
+                    for w in ws.iter().rev() {
                         queue.push_front(*w);
                     }
                 } else {
                     expanded_us.push(v);
                 }
             }
+
+            log::debug!(
+                "complete expansion of >{} is {}",
+                v.unpack_number(),
+                expanded_us
+                    .iter()
+                    .map(|w| format!(
+                        "{}{}",
+                        if w.is_reverse() { '<' } else { '>' },
+                        w.unpack_number()
+                    ))
+                    .collect::<Vec<String>>()
+                    .join("")
+            );
+
             res.insert(*v, expanded_us);
         }
         res
@@ -486,23 +530,23 @@ fn check_path(graph: &HashGraph, del_subg: &DeletedSubGraph, path: &Vec<(usize, 
         let u = Handle::new(path[i].0, path[i].1);
         let v = Handle::new(path[j].0, path[j].1);
 
-//        if !graph.has_edge(u, v) {
-//            panic!(
-//                "edge {}{}{}{} is not part of the graph",
-//                if u.is_reverse() { '<' } else { '>' },
-//                u.unpack_number(),
-//                if v.is_reverse() { '<' } else { '>' },
-//                v.unpack_number()
-//            );
-//        } else if del_subg.edge_deleted(&u, &v) {
-//            panic!(
-//                "edge {}{}{}{} is deleted",
-//                if u.is_reverse() { '<' } else { '>' },
-//                u.unpack_number(),
-//                if v.is_reverse() { '<' } else { '>' },
-//                v.unpack_number()
-//            );
-//        }
+        //        if !graph.has_edge(u, v) {
+        //            panic!(
+        //                "edge {}{}{}{} is not part of the graph",
+        //                if u.is_reverse() { '<' } else { '>' },
+        //                u.unpack_number(),
+        //                if v.is_reverse() { '<' } else { '>' },
+        //                v.unpack_number()
+        //            );
+        //        } else if del_subg.edge_deleted(&u, &v) {
+        //            panic!(
+        //                "edge {}{}{}{} is deleted",
+        //                if u.is_reverse() { '<' } else { '>' },
+        //                u.unpack_number(),
+        //                if v.is_reverse() { '<' } else { '>' },
+        //                v.unpack_number()
+        //            );
+        //        }
         if del_subg.node_deleted(&u) || del_subg.node_deleted(&v) {
             panic!(
                 "either node {}{} or {}{} or both are deleted",
