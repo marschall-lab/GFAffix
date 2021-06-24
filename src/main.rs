@@ -559,6 +559,7 @@ fn parse_and_transform_walks<W: io::Write, R: io::Read>(
 
     let reader = Csv::from_reader(&mut data)
         .delimiter(b'\t')
+        .flexible(true)
         .has_header(false);
 
     for row in reader.into_iter() {
