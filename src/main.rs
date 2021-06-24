@@ -590,6 +590,7 @@ fn parse_and_transform_walks<W: io::Write, R: io::Read>(
                             sid, walk_ident)
                     };
                     walk.push((sid, o));
+                    cur_el.clear();
                 }
                 cur_el.push(*c);
             }
