@@ -81,6 +81,7 @@ pub struct CollapseEventTracker {
     pub overlapping_events: usize,
     pub bubbles: usize,
     pub events: usize,
+
 }
 
 impl CollapseEventTracker {
@@ -90,18 +91,15 @@ impl CollapseEventTracker {
         shared_prefix_nodes: &Vec<Handle>,
         splitted_node_pairs: &Vec<(Handle, Option<Handle>)>,
     ) {
+
         self.events += 1;
         let is_bubble = splitted_node_pairs.iter().all(|(_, x)| x.is_none());
         if is_bubble {
             self.bubbles += 1;
         }
+
         for i in 0..shared_prefix_nodes.len() {
-            let v = shared_prefix_nodes[i];
-            if self.transform.contains_key(&v)
-                || (is_bubble && self.transform.contains_key(&v.flip()))
-            {
-                self.overlapping_events += 1
-            }
+            let mut v = shared_prefix_nodes[i];
 
             // record transformation of node, even if none took place (which is the case if node v
             // equals the dedicated shared prefix node
@@ -110,14 +108,94 @@ impl CollapseEventTracker {
             if let Some(u) = splitted_node_pairs[i].1 {
                 replacement.push(u)
             }
-            self.transform.insert(v, replacement.clone());
-            if is_bubble {
-                // if shared prefix is a bubble than also record the reverse complementary
-                // transformation
-                self.transform
-                    .insert(v.flip(), replacement.iter().map(|u| u.flip()).collect());
+
+            // orient transformation
+            // important notice:
+            // - handle_graph::split_node() works only in forward direction 
+            // - the first node of the split pair an will always be the node itself (again in
+            //   forward direction)
+            if v.is_reverse() {
+                v = v.flip();
+                replacement.reverse();
+                for v in replacement.iter_mut() {
+                    *v = v.flip()
+                }
+            }
+
+            // update transformation rules
+            if self.transform.contains_key(&v) {
+                self.overlapping_events += 1;
+                let us = self.transform.get_mut(&v).unwrap();
+                match us.iter().position(|&u| u == v) {
+                    Some(p) => {
+                        us.remove(p);
+                        for (j, r) in replacement.iter().enumerate().rev() {
+                            us.insert(p+j, *r); 
+                        }
+                    },
+                    None => panic!("cannot replace an {}, because it no longer exists",
+                        v.unpack_number())
+                }
+            } else {
+                log::debug!("update replacement rule for {}", v.unpack_number());
+                self.transform.insert(v, replacement.clone());
             }
         }
+    }
+
+    fn expand(&self, mut v: Handle) -> Vec<Handle> {
+        let mut res : Vec<Handle> = Vec::new();
+
+        let do_flip = v.is_reverse();
+        if do_flip{
+            v = v.flip();
+        }
+        if self.transform.contains_key(&v){
+            for u in self.transform.get(&v).unwrap() {
+                // if node appears in its expansion sequence, it must appear in forward direction
+                // by definition
+                if *u != v {
+                    res.extend(self.expand(*u));
+                } else {
+                    res.push(*u)
+                }
+            }
+        } else {
+            res.push(v);
+        }
+
+        if do_flip {
+            res.reverse();
+            for v in res.iter_mut() {
+                *v = v.flip();
+            }
+        }
+        res
+    }
+
+    fn get_expanded_transformation(&self) -> FxHashMap<Handle, Vec<Handle>> {
+
+        let mut res: FxHashMap<Handle, Vec<Handle>> = FxHashMap::default();
+        res.reserve(self.transform.len());
+
+        for v in self.transform.keys() {
+            let vs = self.expand(*v);
+            log::debug!("deep-expansion of node {} to {} ", 
+                v.unpack_number(),
+                vs 
+                    .iter()
+                    .map(|w| format!(
+                        "{}{}",
+                        if w.is_reverse() { '<' } else { '>' },
+                        w.unpack_number()
+                    ))
+                    .collect::<Vec<String>>()
+                    .join("")
+            );
+
+            res.insert(*v, vs);
+        }
+        res
     }
 
     fn new() -> Self {
@@ -129,90 +207,8 @@ impl CollapseEventTracker {
         }
     }
 
-    fn get_canonized_transformation(&self) -> FxHashMap<Handle, Vec<Handle>> {
-        let mut oriented_transmap: FxHashMap<Handle, Vec<Handle>> = FxHashMap::default();
-        oriented_transmap.reserve(self.transform.len());
-
-        for (v, us) in self.transform.iter() {
-            if v.is_reverse() {
-                oriented_transmap.insert(v.flip(), us.iter().map(|u| u.flip()).rev().collect());
-            } else {
-                oriented_transmap.insert(*v, us.clone());
-            }
-        }
-
-        let mut res: FxHashMap<Handle, Vec<Handle>> = FxHashMap::default();
-        res.reserve(self.transform.len());
-
-        for (v, us) in oriented_transmap.iter() {
-            let mut expanded_us: Vec<Handle> = Vec::new();
-            let mut queue: VecDeque<Handle> = VecDeque::new();
-            queue.extend(us.clone());
-
-            log::debug!("deep-expansion of node {}:", v.unpack_number());
-            while let Some(v) = queue.pop_front() {
-                let msg = format!(">{} is replaced by ", v.unpack_number());
-                if v.is_reverse() && oriented_transmap.contains_key(&v.flip()) {
-                    let ws = oriented_transmap.get(&v.flip()).unwrap();
-                    // because the sequence is reversed, the last element must come first and vice
-                    // versa...
-                    log::debug!(
-                        "{}{}",
-                        msg,
-                        ws.iter()
-                            .rev()
-                            .map(|w| format!(
-                                "{}{}",
-                                if w.flip().is_reverse() { '<' } else { '>' },
-                                w.unpack_number()
-                            ))
-                            .collect::<Vec<String>>()
-                            .join("")
-                    );
-                    for w in ws {
-                        queue.push_front(w.flip())
-                    }
-                } else if oriented_transmap.contains_key(&v) {
-                    let ws = oriented_transmap.get(&v).unwrap();
-                    log::debug!(
-                        "{}{}",
-                        msg,
-                        ws.iter()
-                            .map(|w| format!(
-                                "{}{}",
-                                if w.is_reverse() { '<' } else { '>' },
-                                w.unpack_number()
-                            ))
-                            .collect::<Vec<String>>()
-                            .join("")
-                    );
-                    for w in ws.iter().rev() {
-                        queue.push_front(*w);
-                    }
-                } else {
-                    expanded_us.push(v);
-                }
-            }
-
-            log::debug!(
-                "complete expansion of >{} is {}",
-                v.unpack_number(),
-                expanded_us
-                    .iter()
-                    .map(|w| format!(
-                        "{}{}",
-                        if w.is_reverse() { '<' } else { '>' },
-                        w.unpack_number()
-                    ))
-                    .collect::<Vec<String>>()
-                    .join("")
-            );
-
-            res.insert(*v, expanded_us);
-        }
-        res
-    }
 }
+
 
 fn enumerate_variant_preserving_shared_affixes(
     graph: &HashGraph,
@@ -524,7 +520,7 @@ fn transform_path(
     res
 }
 
-fn check_path(graph: &HashGraph, del_subg: &DeletedSubGraph, path: &Vec<(usize, Orientation)>) {
+fn check_path(_graph: &HashGraph, del_subg: &DeletedSubGraph, path: &Vec<(usize, Orientation)>) {
     for j in 1..path.len() {
         let i = j - 1;
         let u = Handle::new(path[i].0, path[i].1);
@@ -790,7 +786,7 @@ fn main() -> Result<(), io::Error> {
                         e
                     );
                 }
-                let transform = event_tracker.get_canonized_transformation();
+                let transform = event_tracker.get_expanded_transformation();
                 if let Err(e) =
                     print_transformed_paths(&gfa, &graph, &transform, &del_subg, &mut graph_out)
                 {
