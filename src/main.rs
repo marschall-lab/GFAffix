@@ -531,7 +531,7 @@ fn find_and_report_variant_preserving_shared_affixes<W: Write>(
                         queue.extend(affix.parents.iter().filter(|u| !del_subg.node_deleted(u)));
                     } else {
                         print(affix, out)?;
-                        if affix.shared_prefix_nodes.iter().any(|&u| {
+                        if affix.parents.iter().any(|&u| {
                             event_tracker
                                 .transform
                                 .contains_key(&(u.unpack_number() as usize, graph.node_len(u)))
