@@ -84,6 +84,8 @@ pub struct CollapseEventTracker {
     pub overlapping_events: usize,
     pub bubbles: usize,
     pub events: usize,
+
+    modified_nodes: FxHashSet<(usize, usize)>,
 }
 
 impl CollapseEventTracker {
@@ -94,6 +96,8 @@ impl CollapseEventTracker {
         splitted_node_pairs: &Vec<(usize, Direction, usize, Handle, Option<(Handle, usize)>)>,
     ) {
         self.events += 1;
+        self.modified_nodes
+            .insert((collapsed_prefix_node.unpack_number() as usize, prefix_len));
         let is_bubble = splitted_node_pairs.iter().all(|x| x.4.is_none());
         if is_bubble {
             self.bubbles += 1;
@@ -120,6 +124,8 @@ impl CollapseEventTracker {
                     },
                     *vlen,
                 ));
+                self.modified_nodes
+                    .insert((v.unpack_number() as usize, *vlen));
             }
 
             // orient transformation
@@ -238,6 +244,7 @@ impl CollapseEventTracker {
             overlapping_events: 0,
             bubbles: 0,
             events: 0,
+            modified_nodes: FxHashSet::default(),
         }
     }
 }
