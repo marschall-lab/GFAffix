@@ -1,12 +1,10 @@
 /* standard use */
-use quick_csv::Csv;
-use rustc_hash::FxHashMap;
-use rustc_hash::FxHashSet;
+use std::cmp::Ordering;
 use std::collections::VecDeque;
 use std::error::Error;
 use std::fs;
-use std::io;
 use std::io::prelude::*;
+use std::io;
 use std::str::{self, FromStr};
 
 /* crate use */
@@ -21,6 +19,9 @@ use handlegraph::{
     hashgraph::HashGraph,
     mutablehandlegraph::{AdditiveHandleGraph, MutableHandles},
 };
+use quick_csv::Csv;
+use rustc_hash::FxHashMap;
+use rustc_hash::FxHashSet;
 
 #[derive(clap::Clap, Debug)]
 #[clap(
@@ -111,7 +112,7 @@ impl CollapseEventTracker {
 
             // orient transformation
             // important notice:
-            // - handle_graph::split_node() works only in forward direction 
+            // - handle_graph::split_handle() works only in forward direction 
             // - the first node of the split pair an will always be the node itself (again in
             //   forward direction)
             if v.is_reverse() {
@@ -278,12 +279,26 @@ fn collapse(
 ) -> Handle {
     let prefix_len = shared_prefix.sequence.len();
 
+    // Sort handles with shared prefix so that reversed ones come first! This is important for the
+    // case that two shared prefixes correspond to the same node, one in forward, and one in
+    // backward dirction (e.g. >1209, <1209 share prefix 'C'). In those cases, the code that splits
+    // handles only works iff the backward oriented handle is split first (e.g., <1209 is split
+    // into <329203 and <1209) and then the forward oriented handle (e.g., truncated handle >1209
+    // is split into >1209 and 329204), Subsequently, either >1209 or >329203 is deleted, with the
+    // other being advanced as dedicated shared prefix node.
+    
+    let mut shared_prefix_nodes = shared_prefix.shared_prefix_nodes.clone();
+    shared_prefix_nodes.sort_by(|x, y| match (x.is_reverse(), y.is_reverse()) {
+        (true, false) => Ordering::Less,
+        (false, true) => Ordering::Greater,
+        _ => Ordering::Equal});
+    
     // update graph in two passes:
-    //  1. split nodes into shared prefix and distinct suffix and appoint dedicated shared
+    //  1. split handles into shared prefix and distinct suffix and appoint dedicated shared
     //  prefix node
     let mut shared_prefix_node_pos: usize = 0;
     let mut splitted_node_pairs: Vec<(Handle, Option<Handle>)> = Vec::new();
-    for (i, v) in shared_prefix.shared_prefix_nodes.iter().enumerate() {
+    for (i, v) in shared_prefix_nodes.iter().enumerate() {
         let v_len = graph.sequence_vec(*v).len();
         if v_len > prefix_len {
             // x corresponds to the shared prefix,
@@ -323,7 +338,7 @@ fn collapse(
     //  2. update deleted edge set, reassign outgoing edges of "empty" nodes to dedicated shared
     //     prefix node
     // there will be always a shared prefix node, so this condition is always true
-    let shared_prefix_node = shared_prefix.shared_prefix_nodes[shared_prefix_node_pos];
+    let shared_prefix_node = shared_prefix_nodes[shared_prefix_node_pos];
     log::debug!(
         "node {}{} is dedicated shared prefix node",
         if shared_prefix_node.is_reverse() {
@@ -391,11 +406,7 @@ fn collapse(
         }
     }
 
-    event_tracker.report(
-        shared_prefix_node,
-        &shared_prefix.shared_prefix_nodes,
-        &splitted_node_pairs,
-    );
+    event_tracker.report(shared_prefix_node, &shared_prefix_nodes, &splitted_node_pairs);
 
     shared_prefix_node
 }
