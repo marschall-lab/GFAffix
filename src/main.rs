@@ -78,7 +78,9 @@ impl DeletedSubGraph {
 
 #[derive(Clone, Debug)]
 pub struct CollapseEventTracker {
-    pub transform: FxHashMap<Handle, Vec<Handle>>,
+    // tranform from (node_id, node_len) -> [(node_id, node_orient, node_len), ..]
+    //                ^ keys are always forward oriented
+    pub transform: FxHashMap<(usize, usize), Vec<(usize, Direction, usize)>>,
     pub overlapping_events: usize,
     pub bubbles: usize,
     pub events: usize,
@@ -87,25 +89,29 @@ pub struct CollapseEventTracker {
 impl CollapseEventTracker {
     fn report(
         &mut self,
+        graph : &HashGraph,
         collapsed_prefix_node: Handle,
-        shared_prefix_nodes: &Vec<Handle>,
-        splitted_node_pairs: &Vec<(Handle, Option<Handle>)>,
+        splitted_node_pairs: &Vec<(usize, Direction, usize, Handle, Option<Handle>)>,
     ) {
         self.events += 1;
-        let is_bubble = splitted_node_pairs.iter().all(|(_, x)| x.is_none());
+        let is_bubble = splitted_node_pairs.iter().all(|x| x.4.is_none());
         if is_bubble {
             self.bubbles += 1;
         }
 
-        for i in 0..shared_prefix_nodes.len() {
-            let mut v = shared_prefix_nodes[i];
+        let prefix_id  = collapsed_prefix_node.unpack_number() as usize;
+        let prefix_orient = if collapsed_prefix_node.is_reverse() { Direction::Left } else
+        {Direction::Right};
+        let prefix_len = graph.node_len(collapsed_prefix_node);
+        for (node_id, node_orient, node_len, _, suffix) in splitted_node_pairs {
 
             // record transformation of node, even if none took place (which is the case if node v
             // equals the dedicated shared prefix node
-            let mut replacement: Vec<Handle> = Vec::new();
-            replacement.push(collapsed_prefix_node);
-            if let Some(u) = splitted_node_pairs[i].1 {
-                replacement.push(u)
+            let mut replacement: Vec<(usize, Direction, usize)> = Vec::new();
+            replacement.push((prefix_id, prefix_orient, prefix_len));
+            if let Some(v) = suffix {
+                replacement.push((v.unpack_number() as usize, if v.is_reverse() { Direction::Left } else
+                        {Direction::Right}, graph.node_len(*v)));
             }
 
             // orient transformation
@@ -113,112 +119,63 @@ impl CollapseEventTracker {
             // - handle_graph::split_handle() works only in forward direction
             // - the first node of the split pair an will always be the node itself (again in
             //   forward direction)
-            if v.is_reverse() {
-                v = v.flip();
+            if *node_orient == Direction::Left {
                 replacement.reverse();
-                for v in replacement.iter_mut() {
-                    *v = v.flip()
+                for r  in replacement.iter_mut() {
+                    r.1 = if r.1 == Direction::Left { Direction::Right } else {Direction::Left};
                 }
             }
-
-            // update transformation rules
-            if self.transform.contains_key(&v) {
-                self.overlapping_events += 1;
-                let us = self.transform.get_mut(&v).unwrap();
-                let old_rule = us
-                    .iter()
-                    .map(|u| {
-                        format!(
-                            "{}{}",
-                            if u.is_reverse() { '<' } else { '>' },
-                            u.unpack_number()
-                        )
-                    })
-                    .collect::<Vec<String>>()
-                    .join("");
-                match us.iter().position(|&u| u == v) {
-                    Some(p) => {
-                        us.remove(p);
-                        for r in replacement.iter().rev() {
-                            us.insert(p, *r);
-                        }
-                    }
-                    None => panic!(
-                        "cannot replace an {}, because it no longer exists",
-                        v.unpack_number()
-                    ),
-                }
-                log::debug!(
-                    "update replacement rule for {} from {} to {}",
-                    v.unpack_number(),
-                    old_rule,
-                    us.iter()
-                        .map(|u| format!(
-                            "{}{}",
-                            if u.is_reverse() { '<' } else { '>' },
-                            u.unpack_number()
-                        ))
-                        .collect::<Vec<String>>()
-                        .join("")
-                );
-            } else {
-                log::debug!("new replacement rule for {}", v.unpack_number());
-                self.transform.insert(v, replacement.clone());
-            }
+            log::debug!("new replacement rule for {}:{}", node_id, node_len);
+            self.transform.insert((*node_id, *node_len), replacement.clone());
         }
     }
 
-    fn expand(&self, mut v: Handle) -> Vec<Handle> {
-        let mut res: Vec<Handle> = Vec::new();
+    fn expand(&self, node_id : usize, node_orient : Direction, node_len : usize) -> Vec<(usize, Direction, usize)> {
+        let mut res: Vec<(usize, Direction, usize)> = Vec::new();
 
-        let do_flip = v.is_reverse();
-        if do_flip {
-            v = v.flip();
-        }
-        if self.transform.contains_key(&v) {
-            for u in self.transform.get(&v).unwrap() {
-                // if node appears in its expansion sequence, it must appear in forward direction
-                // by definition
-                if *u != v {
-                    res.extend(self.expand(*u));
+        if self.transform.contains_key(&(node_id, node_len)) {
+            for (rid, rorient, rlen) in self.transform.get(&(node_id, node_len)).unwrap() {
+                // if identical node appears in its expansion sequence, don't expand...
+                if (*rid, *rlen) != (node_id, node_len) {
+                    res.extend(self.expand(*rid, *rorient, *rlen));
                 } else {
-                    res.push(*u)
+                    res.push((*rid, *rorient, *rlen));
                 }
             }
         } else {
-            res.push(v);
+            res.push((node_id, node_orient, node_len));
         }
 
-        if do_flip {
+        if node_orient == Direction::Left {
             res.reverse();
-            for v in res.iter_mut() {
-                *v = v.flip();
+            for x in res.iter_mut() {
+                x.1 = match x.1 {Direction::Left => Direction::Right, 
+                    Direction::Right => Direction:: Left };
             }
         }
         res
     }
 
-    fn get_expanded_transformation(&self) -> FxHashMap<Handle, Vec<Handle>> {
-        let mut res: FxHashMap<Handle, Vec<Handle>> = FxHashMap::default();
+    fn get_expanded_transformation(&self) -> FxHashMap<(usize, usize), Vec<(usize, Direction, usize)>> {
+        let mut res: FxHashMap<(usize, usize), Vec<(usize, Direction, usize)>> = FxHashMap::default();
         res.reserve(self.transform.len());
 
-        for v in self.transform.keys() {
-            log::debug!("expanding node {} ... ", v.unpack_number());
-            let vs = self.expand(*v);
+        for (node_id, node_len) in self.transform.keys() {
+            log::debug!("expanding node {}:{} ... ", node_id, node_len);
+            let expansion = self.expand(*node_id, Direction::Right, *node_len);
             log::debug!(
-                "deep-expansion of node {} to {} ",
-                v.unpack_number(),
-                vs.iter()
-                    .map(|w| format!(
-                        "{}{}",
-                        if w.is_reverse() { '<' } else { '>' },
-                        w.unpack_number()
+                "deep-expansion of node {}:{} into {}", node_id, node_len,
+                expansion.iter()
+                    .map(|(rid, ro, rlen)| format!(
+                        "{}{}:{}",
+                        if *ro == Direction::Left { '<' } else { '>' },
+                        rid, rlen
                     ))
                     .collect::<Vec<String>>()
                     .join("")
             );
 
-            res.insert(*v, vs);
+            res.insert((*node_id, *node_len), expansion);
         }
         res
     }
@@ -244,7 +201,6 @@ fn enumerate_variant_preserving_shared_affixes(
     // traverse multifurcation in the forward direction of the handle
     for u in graph.neighbors(v, Direction::Right) {
         if !del_subg.node_deleted(&u) {
-            let seq = graph.sequence_vec(u);
             // get parents of u
             let mut parents: Vec<Handle> = graph
                 .neighbors(u, Direction::Left)
@@ -253,7 +209,7 @@ fn enumerate_variant_preserving_shared_affixes(
             parents.sort();
             // insert child in variant-preserving data structure
             branch
-                .entry((seq[0], parents))
+                .entry((graph.base(u, 0).unwrap(), parents))
                 .or_insert(Vec::new())
                 .push(u);
         }
@@ -320,9 +276,17 @@ fn collapse(
     //  1. split handles into shared prefix and distinct suffix and appoint dedicated shared
     //  prefix node
     let mut shared_prefix_node_pos: usize = 0;
-    let mut splitted_node_pairs: Vec<(Handle, Option<Handle>)> = Vec::new();
+    // each element in splitted_node_pairs is of the form:
+    //  1. node ID of original handle
+    //  2. direction of original handle
+    //  3. length of original handle
+    //  4-5. splitted handle (IMPORTANT: that's generally not equivalent with the replacement
+    //  handles!)
+    let mut splitted_node_pairs: Vec<(usize, Direction, usize, Handle, Option<Handle>)> = Vec::new();
     for (i, v) in shared_prefix_nodes.iter().enumerate() {
-        let v_len = graph.sequence_vec(*v).len();
+        let v_len = graph.node_len(*v);
+        let node_id = v.unpack_number() as usize;
+        let node_orient = if v.is_reverse() { Direction::Left} else {Direction::Right};
         if v_len > prefix_len {
             // x corresponds to the shared prefix,
             let (x, u) = if v.is_reverse() {
@@ -332,7 +296,7 @@ fn collapse(
             } else {
                 graph.split_handle(*v, prefix_len)
             };
-            splitted_node_pairs.push((x, Some(u)));
+            splitted_node_pairs.push((node_id, node_orient, v_len, x, Some(u)));
             // update dedicated shared prefix node if none has been assigned yet
             log::debug!(
                 "splitting node {}{} into prefix {}{} and suffix {}{}",
@@ -347,7 +311,7 @@ fn collapse(
             // always use a node as dedicated shared prefix node if that node coincides with the
             // prefix
             shared_prefix_node_pos = i;
-            splitted_node_pairs.push((*v, None));
+            splitted_node_pairs.push((node_id, node_orient, v_len, *v, None));
             log::debug!(
                 "node {}{} matches prefix {}",
                 if v.is_reverse() { '<' } else { '>' },
@@ -360,7 +324,7 @@ fn collapse(
     //  2. update deleted edge set, reassign outgoing edges of "empty" nodes to dedicated shared
     //     prefix node
     // there will be always a shared prefix node, so this condition is always true
-    let shared_prefix_node = splitted_node_pairs[shared_prefix_node_pos].0;
+    let shared_prefix_node = splitted_node_pairs[shared_prefix_node_pos].3;
     log::debug!(
         "node {}{} is dedicated shared prefix node",
         if shared_prefix_node.is_reverse() {
@@ -371,7 +335,7 @@ fn collapse(
         shared_prefix_node.unpack_number()
     );
 
-    for (u, maybe_v) in splitted_node_pairs.iter() {
+    for (_, _, _, u, maybe_v) in splitted_node_pairs.iter() {
         if *u != shared_prefix_node {
             // rewrire outgoing edges
             match maybe_v {
@@ -428,12 +392,7 @@ fn collapse(
         }
     }
 
-    event_tracker.report(
-        shared_prefix_node,
-        &shared_prefix_nodes,
-        &splitted_node_pairs,
-    );
-
+    event_tracker.report(graph, shared_prefix_node, &splitted_node_pairs);
     shared_prefix_node
 }
 
@@ -518,79 +477,59 @@ fn find_and_report_variant_preserving_shared_affixes<W: Write>(
 }
 
 fn transform_path(
-    path: &Vec<(usize, Orientation)>,
-    transform: &FxHashMap<Handle, Vec<Handle>>,
-) -> Vec<(usize, Orientation)> {
-    let mut res: Vec<(usize, Orientation)> = Vec::new();
+    path: &Vec<(usize, Direction, usize)>,
+    transform: &FxHashMap<(usize, usize), Vec<(usize, Direction, usize)>>,
+) -> Vec<(usize, Direction)> {
+    let mut res: Vec<(usize, Direction)> = Vec::new();
 
-    for (sid, o) in path.iter() {
-        let v = Handle::new(*sid, Orientation::Forward);
-        match transform.get(&v) {
+    for (sid, o, slen) in path.iter() {
+        match transform.get(&(*sid, *slen)) {
             Some(us) => res.extend(
-                (match o {
-                    Orientation::Forward => us.clone(),
-                    Orientation::Backward => us.iter().rev().map(|u| u.flip()).collect(),
-                })
-                .iter()
-                .map(|u| {
-                    (
-                        u.unpack_number() as usize,
-                        if u.is_reverse() {
-                            Orientation::Backward
-                        } else {
-                            Orientation::Forward
-                        },
-                    )
+                match o {
+                    Direction::Right => us.iter().map(|(x, y, _)| (*x, *y)).collect::<Vec<(usize, Direction)>>(),
+                    Direction::Left  => us.iter().rev().map(|(x, y, _)| (*x, if *y == Direction::Left {Direction::Right } else {Direction::Left})).collect::<Vec<(usize, Direction)>>(),
                 }),
-            ),
-            None => res.push((
-                v.unpack_number() as usize,
-                if v.is_reverse() {
-                    Orientation::Backward
-                } else {
-                    Orientation::Forward
-                },
-            )),
+            None => res.push((*sid, *o)),
         }
     }
 
     res
 }
 
-fn check_path(_graph: &HashGraph, del_subg: &DeletedSubGraph, path: &Vec<(usize, Orientation)>) {
-    for j in 1..path.len() {
-        let i = j - 1;
-        let u = Handle::new(path[i].0, path[i].1);
-        let v = Handle::new(path[j].0, path[j].1);
-
-        //        if !graph.has_edge(u, v) {
-        //            panic!(
-        //                "edge {}{}{}{} is not part of the graph",
-        //                if u.is_reverse() { '<' } else { '>' },
-        //                u.unpack_number(),
-        //                if v.is_reverse() { '<' } else { '>' },
-        //                v.unpack_number()
-        //            );
-        //        } else if del_subg.edge_deleted(&u, &v) {
-        //            panic!(
-        //                "edge {}{}{}{} is deleted",
-        //                if u.is_reverse() { '<' } else { '>' },
-        //                u.unpack_number(),
-        //                if v.is_reverse() { '<' } else { '>' },
-        //                v.unpack_number()
-        //            );
-        //        }
-        if del_subg.node_deleted(&u) || del_subg.node_deleted(&v) {
-            panic!(
-                "either node {}{} or {}{} or both are deleted",
-                if u.is_reverse() { '<' } else { '>' },
-                u.unpack_number(),
-                if v.is_reverse() { '<' } else { '>' },
-                v.unpack_number()
-            );
-        }
-    }
-}
+//fn check_path(_graph: &HashGraph, del_subg: &DeletedSubGraph, path: &Vec<(usize, Orientation)>) {
+//    for j in 1..path.len() {
+//        let i = j - 1;
+//        let u = Handle::new(path[i].0, path[i].1);
+//        let v = Handle::new(path[j].0, path[j].1);
+//
+//        //        if !graph.has_edge(u, v) {
+//        //            panic!(
+//        //                "edge {}{}{}{} is not part of the graph",
+//        //                if u.is_reverse() { '<' } else { '>' },
+//        //                u.unpack_number(),
+//        //                if v.is_reverse() { '<' } else { '>' },
+//        //                v.unpack_number()
+//        //            );
+//        //        } else if del_subg.edge_deleted(&u, &v) {
+//        //            panic!(
+//        //                "edge {}{}{}{} is deleted",
+//        //                if u.is_reverse() { '<' } else { '>' },
+//        //                u.unpack_number(),
+//        //                if v.is_reverse() { '<' } else { '>' },
+//        //                v.unpack_number()
+//        //            );
+//        //        }
+//        if del_subg.node_deleted(&u) || del_subg.node_deleted(&v) {
+//            panic!(
+//                "either node {}{} or {}{} or both are deleted",
+//                if u.is_reverse() { '<' } else { '>' },
+//                u.unpack_number(),
+//                if v.is_reverse() { '<' } else { '>' },
+//                v.unpack_number()
+//            );
+//        }
+//    }
+//}
 
 fn print<W: io::Write>(affix: &AffixSubgraph, out: &mut io::BufWriter<W>) -> Result<(), io::Error> {
     let parents: Vec<String> = affix
@@ -662,41 +601,42 @@ fn print_active_subgraph<W: io::Write>(
     Ok(())
 }
 
-fn print_transformed_paths<W: io::Write>(
-    gfa: &GFA<usize, ()>,
-    graph: &HashGraph,
-    transform: &FxHashMap<Handle, Vec<Handle>>,
-    del_subg: &DeletedSubGraph,
-    out: &mut io::BufWriter<W>,
-) -> Result<(), Box<dyn Error>> {
-    for path in gfa.paths.iter() {
-        log::debug!("transforming path {}", str::from_utf8(&path.path_name)?);
-        let tpath = transform_path(&path.iter().collect(), &transform);
-        check_path(graph, del_subg, &tpath);
-        writeln!(
-            out,
-            "P\t{}\t{}\t*",
-            str::from_utf8(&path.path_name)?,
-            tpath
-                .iter()
-                .map(|(sid, o)| format!(
-                    "{}{}",
-                    sid,
-                    if *o == Orientation::Forward { '+' } else { '-' }
-                ))
-                .collect::<Vec<String>>()
-                .join(",")
-        )?;
-    }
-
-    Ok(())
-}
+//fn print_transformed_paths<W: io::Write>(
+//    gfa: &GFA<usize, ()>,
+//    graph: &HashGraph,
+//    transform: &FxHashMap<Handle, Vec<Handle>>,
+//    del_subg: &DeletedSubGraph,
+//    out: &mut io::BufWriter<W>,
+//) -> Result<(), Box<dyn Error>> {
+//    for path in gfa.paths.iter() {
+//        log::debug!("transforming path {}", str::from_utf8(&path.path_name)?);
+//        let tpath = transform_path(&path.iter().collect(), &transform);
+//        check_path(graph, del_subg, &tpath);
+//        writeln!(
+//            out,
+//            "P\t{}\t{}\t*",
+//            str::from_utf8(&path.path_name)?,
+//            tpath
+//                .iter()
+//                .map(|(sid, o)| format!(
+//                    "{}{}",
+//                    sid,
+//                    if *o == Orientation::Forward { '+' } else { '-' }
+//                ))
+//                .collect::<Vec<String>>()
+//                .join(",")
+//        )?;
+//    }
+//
+//    Ok(())
+//}
 
 fn parse_and_transform_walks<W: io::Write, R: io::Read>(
     mut data: io::BufReader<R>,
-    graph: &HashGraph,
-    transform: &FxHashMap<Handle, Vec<Handle>>,
-    del_subg: &DeletedSubGraph,
+//    graph: &HashGraph,
+    transform: &FxHashMap<(usize, usize), Vec<(usize, Direction, usize)>>,
+    orig_node_lens : &FxHashMap<usize,usize>,
+//    del_subg: &DeletedSubGraph,
     out: &mut io::BufWriter<W>,
 ) -> Result<(), Box<dyn Error>> {
     let reader = Csv::from_reader(&mut data)
@@ -721,21 +661,21 @@ fn parse_and_transform_walks<W: io::Write, R: io::Read>(
             log::debug!("transforming walk {}", walk_ident);
 
             let walk_data = row_it.next().unwrap();
-            let mut walk: Vec<(usize, Orientation)> = Vec::new();
+            let mut walk: Vec<(usize, Direction, usize)> = Vec::new();
 
             let mut cur_el: Vec<u8> = Vec::new();
             for c in walk_data {
                 if (c == &b'>' || c == &b'<') && !cur_el.is_empty() {
                     let sid = usize::from_str(str::from_utf8(&cur_el[1..])?)?;
                     let o = match cur_el[0] {
-                        b'>' => Orientation::Forward,
-                        b'<' => Orientation::Backward,
+                        b'>' => Direction::Right,
+                        b'<' => Direction::Left,
                         _ => panic!(
                             "unknown orientation '{}' of segment {} in walk {}",
                             cur_el[0], sid, walk_ident
                         ),
                     };
-                    walk.push((sid, o));
+                    walk.push((sid, o, *orig_node_lens.get(&sid).unwrap()));
                     cur_el.clear();
                 }
                 cur_el.push(*c);
@@ -744,18 +684,18 @@ fn parse_and_transform_walks<W: io::Write, R: io::Read>(
             if !cur_el.is_empty() {
                 let sid = usize::from_str(str::from_utf8(&cur_el[1..])?)?;
                 let o = match cur_el[0] {
-                    b'>' => Orientation::Forward,
-                    b'<' => Orientation::Backward,
+                    b'>' => Direction::Right,
+                    b'<' => Direction::Left,
                     _ => panic!(
                         "unknown orientation '{}' of segment {} in walk {}",
                         cur_el[0], sid, walk_ident
                     ),
                 };
-                walk.push((sid, o));
+                walk.push((sid, o, *orig_node_lens.get(&sid).unwrap()));
             }
 
             let tpath = transform_path(&walk, &transform);
-            check_path(graph, del_subg, &tpath);
+//            check_path(graph, del_subg, &tpath);
             writeln!(
                 out,
                 "W\t{}\t{}\t{}\t{}\t{}\t{}",
@@ -768,7 +708,7 @@ fn parse_and_transform_walks<W: io::Write, R: io::Read>(
                     .iter()
                     .map(|(sid, o)| format!(
                         "{}{}",
-                        if *o == Orientation::Forward { '>' } else { '<' },
+                        if *o == Direction::Right { '>' } else { '<' },
                         sid
                     ))
                     .collect::<Vec<String>>()
@@ -795,6 +735,13 @@ fn main() -> Result<(), io::Error> {
 
     log::info!("constructing handle graph");
     let mut graph = HashGraph::from_gfa(&gfa);
+
+    log::info!("storing length of original nodes for bookkeeping");
+    let mut node_lens : FxHashMap<usize, usize> = FxHashMap::default();
+    node_lens.reserve(graph.node_count());
+    for v in graph.handles() {
+        node_lens.insert(v.unpack_number() as usize, graph.node_len(v));
+    }
 
     log::info!("identifying variant-preserving shared prefixes");
     writeln!(
@@ -824,20 +771,20 @@ fn main() -> Result<(), io::Error> {
                     );
                 }
                 let transform = event_tracker.get_expanded_transformation();
-                log::info!("transforming paths..");
-                if let Err(e) =
-                    print_transformed_paths(&gfa, &graph, &transform, &del_subg, &mut graph_out)
-                {
-                    panic!(
-                        "unable to write refined graph paths to {}: {}",
-                        params.refined_graph_out.clone(),
-                        e
-                    );
-                };
+//                log::info!("transforming paths..");
+//                if let Err(e) =
+//                    print_transformed_paths(&gfa, &graph, &transform, &del_subg, &mut graph_out)
+//                {
+//                    panic!(
+//                        "unable to write refined graph paths to {}: {}",
+//                        params.refined_graph_out.clone(),
+//                        e
+//                    );
+//                };
                 log::info!("transforming walks..");
                 let data = io::BufReader::new(fs::File::open(&params.graph)?);
                 if let Err(e) =
-                    parse_and_transform_walks(data, &graph, &transform, &del_subg, &mut graph_out)
+                    parse_and_transform_walks(data, &transform, &node_lens, &mut graph_out)
                 {
                     panic!(
                         "unable to parse or write refined graph walks to {}: {}",
