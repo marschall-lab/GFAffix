@@ -42,6 +42,14 @@ pub struct Command {
         default_value = " "
     )]
     pub refined_graph_out: String,
+
+    #[clap(
+        short = 't',
+        long = "output_transformation",
+        about = "report original nodes and their corresponding paths in refined graph to supplied file",
+        default_value = " "
+    )]
+    pub transformation_out: String,
 }
 
 // structure for storing reported subgraph
@@ -494,8 +502,8 @@ fn get_shared_prefix(
     String::from_utf8(seq)
 }
 
-fn find_and_collapse_variant_preserving_shared_affixes(
-    graph: &mut HashGraph) -> (DeletedSubGraph, CollapseEventTracker) {
+fn find_and_collapse_variant_preserving_shared_affixes<W: Write>(
+    graph: &mut HashGraph, out : &mut io::BufWriter<W>) -> (DeletedSubGraph, CollapseEventTracker) {
     let mut del_subg = DeletedSubGraph::new();
 
     let mut event_tracker = CollapseEventTracker::new();
@@ -528,6 +536,7 @@ fn find_and_collapse_variant_preserving_shared_affixes(
                         // push non-deleted parents back on queue
                         queue.extend(affix.parents.iter().filter(|u| !del_subg.node_deleted(u)));
                     } else {
+                        print(affix, out).unwrap();
                         if affix
                             .parents
                             .iter()
@@ -714,7 +723,6 @@ fn check_transform(
 }
 
 fn print_transformations<W: Write>(
-    graph: &HashGraph,
     transform: &FxHashMap<(usize, usize), Vec<(usize, Direction, usize)>>,
     orig_node_lens: &FxHashMap<usize, usize>,
     out: &mut io::BufWriter<W>,
@@ -763,6 +771,41 @@ fn spell_walk(graph: &HashGraph, walk: &Vec<(usize, Direction, usize)>) -> Vec<u
     }
     res
 }
+
+fn print<W: io::Write>(affix: &AffixSubgraph, out: &mut io::BufWriter<W>) -> Result<(), io::Error> {
+    let parents: Vec<String> = affix
+        .parents
+        .iter()
+        .map(|&v| {
+            format!(
+                "{}{}",
+                if v.is_reverse() { '<' } else { '>' },
+                v.unpack_number(),
+            )
+        })
+        .collect();
+    let children: Vec<String> = affix
+        .shared_prefix_nodes
+        .iter()
+        .map(|&v| {
+            format!(
+                "{}{}",
+                if v.is_reverse() { '<' } else { '>' },
+                v.unpack_number(),
+            )
+        })
+        .collect();
+    writeln!(
+        out,
+        "{}\t{}\t{}\t{}",
+        parents.join(","),
+        children.join(","),
+        affix.sequence.len(),
+        &affix.sequence,
+    )?;
+    Ok(())
+}
+
 
 //fn print_transformed_paths<W: io::Write>(
 //    gfa: &GFA<usize, ()>,
@@ -918,14 +961,16 @@ fn main() -> Result<(), io::Error> {
         ]
         .join("\t")
     )?;
-    let (del_subg, event_tracker) = find_and_collapse_variant_preserving_shared_affixes(&mut graph);
+    let (del_subg, event_tracker) = find_and_collapse_variant_preserving_shared_affixes(&mut graph, &mut out);
     let transform = event_tracker.get_expanded_transformation();
 
     // check transformation
     let old_graph = HashGraph::from_gfa(&gfa);
     check_transform(&old_graph, &graph, &transform);
 
-    if let Err(e) = print_transformations(&graph, &transform, &node_lens, &mut out) {
+    let mut graph_out =
+        io::BufWriter::new(fs::File::create(params..clone())?);
+    if let Err(e) = print_transformations(&transform, &node_lens, &mut out) {
         panic!("unable to write graph transformations to stdout: {}", e);
     }
 
