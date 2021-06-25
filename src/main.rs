@@ -198,10 +198,21 @@ impl CollapseEventTracker {
         res.reserve(self.transform.len());
 
         for (node_id, node_len) in self.transform.keys() {
-            log::debug!("expanding node {}:{} ... ", node_id, node_len);
             let expansion = self.expand(*node_id, Direction::Right, *node_len);
             log::debug!(
-                "deep-expansion of node {}:{} into {}",
+                "deep-expansion of path {} of node {}:{} into {}",
+                self.transform
+                    .get(&(*node_id, *node_len))
+                    .unwrap()
+                    .iter()
+                    .map(|(rid, ro, rlen)| format!(
+                        "{}{}:{}",
+                        if *ro == Direction::Left { '<' } else { '>' },
+                        rid,
+                        rlen
+                    ))
+                    .collect::<Vec<String>>()
+                    .join(""),
                 node_id,
                 node_len,
                 expansion
@@ -688,7 +699,7 @@ fn check_transform(
         let path_len: usize = path.iter().map(|x| x.2).sum();
         if *vlen != path_len {
             panic!(
-                "Length of path {} does not sum up to that of its replacing node of {}:{}",
+                "length of path {} does not sum up to that of its replacing node of {}:{}",
                 path.iter()
                     .map(|(rid, ro, rlen)| format!(
                         "{}{}:{}",
@@ -708,11 +719,19 @@ fn check_transform(
             let old_seq = old_graph.sequence_vec(v);
             let new_seq = spell_walk(new_graph, path);
             if old_seq != new_seq {
-                panic!("node {} in old graph spells sequence {}, but walk {} in new graph spells sequence {}", vid, String::from_utf8(old_seq).unwrap(), 
-               path.iter().map(|(rid, ro, _)| format!( "{}{}", 
-                       if *ro == Direction::Left { '<' }
-                       else { '>' }, rid,)).collect::<Vec<String>>().join(""),
-                       String::from_utf8(new_seq).unwrap());
+                panic!(
+                    "node {} in old graph spells sequence {}, but walk {} in new graph spell sequence {}", 
+                    vid,
+                    String::from_utf8(old_seq).unwrap(),
+                    path.iter()
+                        .map(|(rid, ro, _)| format!(
+                                "{}{}",
+                                if *ro == Direction::Left { '<' } else { '>' },
+                        rid,))
+                        .collect::<Vec<String>>()
+                        .join(""), 
+                    String::from_utf8(new_seq).unwrap()
+                    );
             }
         }
     }
