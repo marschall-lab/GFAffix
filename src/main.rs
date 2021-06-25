@@ -91,7 +91,7 @@ impl CollapseEventTracker {
         &mut self,
         graph: &HashGraph,
         collapsed_prefix_node: Handle,
-        splitted_node_pairs: &Vec<(usize, Direction, usize, Handle, Option<Handle>)>,
+        splitted_node_pairs: &Vec<(usize, Direction, usize, Handle, Option<(Handle, usize)>)>,
     ) {
         self.events += 1;
         let is_bubble = splitted_node_pairs.iter().all(|x| x.4.is_none());
@@ -111,7 +111,7 @@ impl CollapseEventTracker {
             // equals the dedicated shared prefix node
             let mut replacement: Vec<(usize, Direction, usize)> = Vec::new();
             replacement.push((prefix_id, prefix_orient, prefix_len));
-            if let Some(v) = suffix {
+            if let Some((v, vlen)) = suffix {
                 replacement.push((
                     v.unpack_number() as usize,
                     if v.is_reverse() {
@@ -119,7 +119,7 @@ impl CollapseEventTracker {
                     } else {
                         Direction::Right
                     },
-                    graph.node_len(*v),
+                    *vlen,
                 ));
             }
 
@@ -324,7 +324,7 @@ fn collapse(
     //  3. length of original handle
     //  4-5. splitted handle (IMPORTANT: that's generally not equivalent with the replacement
     //  handles!)
-    let mut splitted_node_pairs: Vec<(usize, Direction, usize, Handle, Option<Handle>)> =
+    let mut splitted_node_pairs: Vec<(usize, Direction, usize, Handle, Option<(Handle, usize)>)> =
         Vec::new();
     for (i, v) in shared_prefix_nodes.iter().enumerate() {
         let v_len = graph.node_len(*v);
@@ -343,7 +343,8 @@ fn collapse(
             } else {
                 graph.split_handle(*v, prefix_len)
             };
-            splitted_node_pairs.push((node_id, node_orient, v_len, x, Some(u)));
+            splitted_node_pairs.push((node_id, node_orient, v_len, x, Some((u,
+                            graph.node_len(u)))));
             // update dedicated shared prefix node if none has been assigned yet
             log::debug!(
                 "splitting node {}{} into prefix {}{} and suffix {}{}",
@@ -386,7 +387,7 @@ fn collapse(
         if *u != shared_prefix_node {
             // rewrire outgoing edges
             match maybe_v {
-                Some(v) => {
+                Some((v, _)) => {
                     // make all suffixes spring from shared suffix node
                     if !graph.has_edge(shared_prefix_node, *v) {
                         graph.create_edge(Edge(shared_prefix_node, *v));
