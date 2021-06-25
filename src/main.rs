@@ -679,14 +679,17 @@ fn print_active_subgraph<W: io::Write>(
     Ok(())
 }
 
-fn check_transform(old_graph: &HashGraph, new_graph: &HashGraph, transform: &FxHashMap<(usize, usize), Vec<(usize, Direction, usize)>>) {
-
+fn check_transform(
+    old_graph: &HashGraph,
+    new_graph: &HashGraph,
+    transform: &FxHashMap<(usize, usize), Vec<(usize, Direction, usize)>>,
+) {
     for ((vid, vlen), path) in transform.iter() {
-        let path_len : usize = path.iter().map(|x| x.2).sum();
+        let path_len: usize = path.iter().map(|x| x.2).sum();
         if *vlen != path_len {
-            panic!("Length of path {} does not sum up to that of its replacing node of {}:{}",
-               path 
-                    .iter()
+            panic!(
+                "Length of path {} does not sum up to that of its replacing node of {}:{}",
+                path.iter()
                     .map(|(rid, ro, rlen)| format!(
                         "{}{}:{}",
                         if *ro == Direction::Left { '<' } else { '>' },
@@ -694,9 +697,46 @@ fn check_transform(old_graph: &HashGraph, new_graph: &HashGraph, transform: &FxH
                         rlen
                     ))
                     .collect::<Vec<String>>()
-                    .join(""), vid, vlen);
+                    .join(""),
+                vid,
+                vlen
+            );
+        }
+
+        let v = Handle::new(*vid, Orientation::Forward);
+        if old_graph.has_node(v.id()) && old_graph.node_len(v) == *vlen {
+            let old_seq = old_graph.sequence_vec(v);
+            let new_seq = spell_walk(new_graph, path);
+            if old_seq != new_seq {
+                panic!("node {} in old graph spells sequence {}, but walk {} in new graph spells sequence {}", vid, String::from_utf8(old_seq).unwrap(), 
+               path.iter().map(|(rid, ro, _)| format!( "{}{}", 
+                       if *ro == Direction::Left { '<' }
+                       else { '>' }, rid,)).collect::<Vec<String>>().join(""),
+                       String::from_utf8(new_seq).unwrap());
+            }
         }
     }
+}
+
+fn spell_walk(graph: &HashGraph, walk: &Vec<(usize, Direction, usize)>) -> Vec<u8> {
+    let mut res: Vec<u8> = Vec::new();
+
+    let mut prev_v: Option<Handle> = None;
+    for (i, (sid, o, _)) in walk.iter().enumerate() {
+        let v = Handle::new(
+            *sid,
+            match o {
+                Direction::Right => Orientation::Forward,
+                Direction::Left => Orientation::Backward,
+            },
+        );
+        if i >= 1 && !graph.has_edge(prev_v.unwrap(), v) {
+            panic!("graph does not have edge {:?}-{:?}", &walk[i - 1], &walk[i]);
+        }
+        res.extend(graph.sequence_vec(v));
+        prev_v = Some(v);
+    }
+    res
 }
 
 //fn print_transformed_paths<W: io::Write>(
@@ -858,6 +898,10 @@ fn main() -> Result<(), io::Error> {
     match res {
         Err(e) => panic!("gfaffix failed: {}", e),
         Ok((del_subg, event_tracker)) => {
+            let transform = event_tracker.get_expanded_transformation();
+            let old_graph = HashGraph::from_gfa(&gfa);
+            check_transform(&old_graph, &graph, &transform);
+
             if !params.refined_graph_out.trim().is_empty() {
                 let mut graph_out =
                     io::BufWriter::new(fs::File::create(params.refined_graph_out.clone())?);
@@ -868,9 +912,6 @@ fn main() -> Result<(), io::Error> {
                         e
                     );
                 }
-                let transform = event_tracker.get_expanded_transformation();
-                let old_graph = HashGraph::from_gfa(&gfa);
-                check_transform(&old_graph, &graph, &transform);
                 //                log::info!("transforming paths..");
                 //                if let Err(e) =
                 //                    print_transformed_paths(&gfa, &graph, &transform, &del_subg, &mut graph_out)
