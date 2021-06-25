@@ -170,10 +170,8 @@ impl CollapseEventTracker {
                 // if identical node appears in its expansion sequence, don't expand...
                 if (*rid, *rlen) != (node_id, node_len) {
                     res.extend(self.expand(*rid, *rorient, *rlen));
-                    log::debug!("call expand with {} {:?} {} ", rid, rorient, rlen);
                 } else {
                     res.push((*rid, *rorient, *rlen));
-                    log::debug!("node is identical to expanded, so push {} {:?} {} ", rid, rorient, rlen);
                 }
             }
             if node_orient == Direction::Left {
