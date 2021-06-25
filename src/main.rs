@@ -176,19 +176,19 @@ impl CollapseEventTracker {
                     log::debug!("node is identical to expanded, so push {} {:?} {} ", rid, rorient, rlen);
                 }
             }
+            if node_orient == Direction::Left {
+                res.reverse();
+                for x in res.iter_mut() {
+                    x.1 = match x.1 {
+                        Direction::Left => Direction::Right,
+                        Direction::Right => Direction::Left,
+                    };
+                }
+            }
         } else {
             res.push((node_id, node_orient, node_len));
         }
 
-        if node_orient == Direction::Left {
-            res.reverse();
-            for x in res.iter_mut() {
-                x.1 = match x.1 {
-                    Direction::Left => Direction::Right,
-                    Direction::Right => Direction::Left,
-                };
-            }
-        }
         res
     }
 
