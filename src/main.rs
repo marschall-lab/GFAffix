@@ -679,6 +679,26 @@ fn print_active_subgraph<W: io::Write>(
     Ok(())
 }
 
+fn check_transform(old_graph: &HashGraph, new_graph: &HashGraph, transform: &FxHashMap<(usize, usize), Vec<(usize, Direction, usize)>>) {
+
+    for ((vid, vlen), path) in transform.iter() {
+        let path_len : usize = path.iter().map(|x| x.2).sum();
+        if *vlen != path_len {
+            panic!("Length of path {} does not sum up to that of its replacing node of {}:{}",
+               path 
+                    .iter()
+                    .map(|(rid, ro, rlen)| format!(
+                        "{}{}:{}",
+                        if *ro == Direction::Left { '<' } else { '>' },
+                        rid,
+                        rlen
+                    ))
+                    .collect::<Vec<String>>()
+                    .join(""), vid, vlen);
+        }
+    }
+}
+
 //fn print_transformed_paths<W: io::Write>(
 //    gfa: &GFA<usize, ()>,
 //    graph: &HashGraph,
@@ -849,6 +869,8 @@ fn main() -> Result<(), io::Error> {
                     );
                 }
                 let transform = event_tracker.get_expanded_transformation();
+                let old_graph = HashGraph::from_gfa(&gfa);
+                check_transform(&old_graph, &graph, &transform);
                 //                log::info!("transforming paths..");
                 //                if let Err(e) =
                 //                    print_transformed_paths(&gfa, &graph, &transform, &del_subg, &mut graph_out)
