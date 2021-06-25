@@ -531,11 +531,16 @@ fn find_and_report_variant_preserving_shared_affixes<W: Write>(
                         queue.extend(affix.parents.iter().filter(|u| !del_subg.node_deleted(u)));
                     } else {
                         print(affix, out)?;
-                        if affix.parents.iter().chain(affix.shared_prefix_nodes.iter()).any(|&u| {
-                            event_tracker
-                                .modified_nodes
-                                .contains(&(u.unpack_number() as usize, graph.node_len(u)))
-                        }) {
+                        if affix
+                            .parents
+                            .iter()
+                            .chain(affix.shared_prefix_nodes.iter())
+                            .any(|&u| {
+                                event_tracker
+                                    .modified_nodes
+                                    .contains(&(u.unpack_number() as usize, graph.node_len(u)))
+                            })
+                        {
                             event_tracker.overlapping_events += 1
                         }
                         let shared_prefix_node =
@@ -744,6 +749,38 @@ fn check_transform(
     }
 }
 
+fn print_transformations<W: Write>(
+    graph: &HashGraph,
+    transform: &FxHashMap<(usize, usize), Vec<(usize, Direction, usize)>>,
+    orig_node_lens: &FxHashMap<usize, usize>,
+    out: &mut io::BufWriter<W>,
+) -> Result<(), io::Error> {
+    for ((vid, vlen), path) in transform.iter() {
+        if match orig_node_lens.get(vid) {
+            Some(l) => l == vlen,
+            _ => false,
+        } && (path.len() > 1 || *vid != path[0].0)
+        {
+            writeln!(
+                out,
+                ">{}\t{}\t{}\t{}",
+                vid,
+                path.iter()
+                    .map(|(rid, ro, _)| format!(
+                        "{}{}",
+                        if *ro == Direction::Left { '<' } else { '>' },
+                        rid,
+                    ))
+                    .collect::<Vec<String>>()
+                    .join(""),
+                vlen,
+                String::from_utf8(spell_walk(graph, path)).unwrap()
+            )?;
+        }
+    }
+    Ok(())
+}
+
 fn spell_walk(graph: &HashGraph, walk: &Vec<(usize, Direction, usize)>) -> Vec<u8> {
     let mut res: Vec<u8> = Vec::new();
 
@@ -927,6 +964,9 @@ fn main() -> Result<(), io::Error> {
             let transform = event_tracker.get_expanded_transformation();
             let old_graph = HashGraph::from_gfa(&gfa);
             check_transform(&old_graph, &graph, &transform);
+            if let Err(e) = print_transformations(&graph, &transform, &node_lens, &mut out) {
+                panic!("unable to write graph transformations to stdout: {}", e);
+            }
 
             if !params.refined_graph_out.trim().is_empty() {
                 let mut graph_out =
