@@ -89,8 +89,8 @@ pub struct CollapseEventTracker {
 impl CollapseEventTracker {
     fn report(
         &mut self,
-        graph: &HashGraph,
         collapsed_prefix_node: Handle,
+        prefix_len: usize,
         splitted_node_pairs: &Vec<(usize, Direction, usize, Handle, Option<(Handle, usize)>)>,
     ) {
         self.events += 1;
@@ -105,7 +105,6 @@ impl CollapseEventTracker {
         } else {
             Direction::Right
         };
-        let prefix_len = graph.node_len(collapsed_prefix_node);
         for (node_id, node_orient, node_len, _, suffix) in splitted_node_pairs {
             // record transformation of node, even if none took place (which is the case if node v
             // equals the dedicated shared prefix node
@@ -343,8 +342,13 @@ fn collapse(
             } else {
                 graph.split_handle(*v, prefix_len)
             };
-            splitted_node_pairs.push((node_id, node_orient, v_len, x, Some((u,
-                            graph.node_len(u)))));
+            splitted_node_pairs.push((
+                node_id,
+                node_orient,
+                v_len,
+                x,
+                Some((u, graph.node_len(u))),
+            ));
             // update dedicated shared prefix node if none has been assigned yet
             log::debug!(
                 "splitting node {}{} into prefix {}{} and suffix {}{}",
@@ -440,7 +444,11 @@ fn collapse(
         }
     }
 
-    event_tracker.report(graph, shared_prefix_node, &splitted_node_pairs);
+    event_tracker.report(
+        shared_prefix_node,
+        graph.node_len(shared_prefix_node),
+        &splitted_node_pairs,
+    );
     shared_prefix_node
 }
 
@@ -505,6 +513,13 @@ fn find_and_report_variant_preserving_shared_affixes<W: Write>(
                         queue.extend(affix.parents.iter().filter(|u| !del_subg.node_deleted(u)));
                     } else {
                         print(affix, out)?;
+                        if affix.shared_prefix_nodes.iter().any(|&u| {
+                            event_tracker
+                                .transform
+                                .contains_key(&(u.unpack_number() as usize, graph.node_len(u)))
+                        }) {
+                            event_tracker.overlapping_events += 1
+                        }
                         let shared_prefix_node =
                             collapse(graph, affix, &mut del_subg, &mut event_tracker);
                         queue.push_back(shared_prefix_node);
