@@ -968,9 +968,9 @@ fn main() -> Result<(), io::Error> {
     let old_graph = HashGraph::from_gfa(&gfa);
     check_transform(&old_graph, &graph, &transform);
 
-    let mut graph_out =
-        io::BufWriter::new(fs::File::create(params..clone())?);
-    if let Err(e) = print_transformations(&transform, &node_lens, &mut out) {
+    let mut trans_out =
+        io::BufWriter::new(fs::File::create(params.transformation_out.clone())?);
+    if let Err(e) = print_transformations(&transform, &node_lens, &mut trans_out) {
         panic!("unable to write graph transformations to stdout: {}", e);
     }
 
