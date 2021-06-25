@@ -494,10 +494,8 @@ fn get_shared_prefix(
     String::from_utf8(seq)
 }
 
-fn find_and_report_variant_preserving_shared_affixes<W: Write>(
-    graph: &mut HashGraph,
-    out: &mut io::BufWriter<W>,
-) -> Result<(DeletedSubGraph, CollapseEventTracker), Box<dyn Error>> {
+fn find_and_collapse_variant_preserving_shared_affixes(
+    graph: &mut HashGraph) -> (DeletedSubGraph, CollapseEventTracker) {
     let mut del_subg = DeletedSubGraph::new();
 
     let mut event_tracker = CollapseEventTracker::new();
@@ -516,7 +514,7 @@ fn find_and_report_variant_preserving_shared_affixes<W: Write>(
                 );
 
                 // process node in forward direction
-                let affixes = enumerate_variant_preserving_shared_affixes(graph, &del_subg, v)?;
+                let affixes = enumerate_variant_preserving_shared_affixes(graph, &del_subg, v).unwrap();
                 for affix in affixes.iter() {
                     has_changed |= true;
                     // in each iteration, the set of deleted nodes can change and affect the
@@ -530,7 +528,6 @@ fn find_and_report_variant_preserving_shared_affixes<W: Write>(
                         // push non-deleted parents back on queue
                         queue.extend(affix.parents.iter().filter(|u| !del_subg.node_deleted(u)));
                     } else {
-                        print(affix, out)?;
                         if affix
                             .parents
                             .iter()
@@ -559,7 +556,7 @@ fn find_and_report_variant_preserving_shared_affixes<W: Write>(
         event_tracker.overlapping_events,
         event_tracker.bubbles
     );
-    Ok((del_subg, event_tracker))
+    (del_subg, event_tracker)
 }
 
 fn transform_path(
@@ -632,39 +629,6 @@ fn transform_path(
 //    }
 //}
 
-fn print<W: io::Write>(affix: &AffixSubgraph, out: &mut io::BufWriter<W>) -> Result<(), io::Error> {
-    let parents: Vec<String> = affix
-        .parents
-        .iter()
-        .map(|&v| {
-            format!(
-                "{}{}",
-                if v.is_reverse() { '<' } else { '>' },
-                v.unpack_number(),
-            )
-        })
-        .collect();
-    let children: Vec<String> = affix
-        .shared_prefix_nodes
-        .iter()
-        .map(|&v| {
-            format!(
-                "{}{}",
-                if v.is_reverse() { '<' } else { '>' },
-                v.unpack_number(),
-            )
-        })
-        .collect();
-    writeln!(
-        out,
-        "{}\t{}\t{}\t{}",
-        parents.join(","),
-        children.join(","),
-        affix.sequence.len(),
-        &affix.sequence,
-    )?;
-    Ok(())
-}
 
 fn print_active_subgraph<W: io::Write>(
     graph: &HashGraph,
@@ -949,57 +913,54 @@ fn main() -> Result<(), io::Error> {
         out,
         "{}",
         [
-            "oriented_parent_nodes",
-            "oriented_child_nodes",
-            "prefix_length",
-            "prefix",
+            "original_node",
+            "transformed_path",
+            "bp_length",
+            "sequence",
         ]
         .join("\t")
     )?;
-    let res = find_and_report_variant_preserving_shared_affixes(&mut graph, &mut out);
+    let (del_subg, event_tracker) = find_and_collapse_variant_preserving_shared_affixes(&mut graph);
+    let transform = event_tracker.get_expanded_transformation();
 
-    match res {
-        Err(e) => panic!("gfaffix failed: {}", e),
-        Ok((del_subg, event_tracker)) => {
-            let transform = event_tracker.get_expanded_transformation();
-            let old_graph = HashGraph::from_gfa(&gfa);
-            check_transform(&old_graph, &graph, &transform);
-            if let Err(e) = print_transformations(&graph, &transform, &node_lens, &mut out) {
-                panic!("unable to write graph transformations to stdout: {}", e);
-            }
+    // check transformation
+    let old_graph = HashGraph::from_gfa(&gfa);
+    check_transform(&old_graph, &graph, &transform);
 
-            if !params.refined_graph_out.trim().is_empty() {
-                let mut graph_out =
-                    io::BufWriter::new(fs::File::create(params.refined_graph_out.clone())?);
-                if let Err(e) = print_active_subgraph(&graph, &del_subg, &mut graph_out) {
-                    panic!(
-                        "unable to write refined graph to {}: {}",
-                        params.refined_graph_out.clone(),
-                        e
-                    );
-                }
-                //                log::info!("transforming paths..");
-                //                if let Err(e) =
-                //                    print_transformed_paths(&gfa, &graph, &transform, &del_subg, &mut graph_out)
-                //                {
-                //                    panic!(
-                //                        "unable to write refined graph paths to {}: {}",
-                //                        params.refined_graph_out.clone(),
-                //                        e
-                //                    );
-                //                };
-                log::info!("transforming walks..");
-                let data = io::BufReader::new(fs::File::open(&params.graph)?);
-                if let Err(e) =
-                    parse_and_transform_walks(data, &transform, &node_lens, &mut graph_out)
-                {
-                    panic!(
-                        "unable to parse or write refined graph walks to {}: {}",
-                        params.refined_graph_out.clone(),
-                        e
-                    );
-                }
-            }
+    if let Err(e) = print_transformations(&graph, &transform, &node_lens, &mut out) {
+        panic!("unable to write graph transformations to stdout: {}", e);
+    }
+
+    if !params.refined_graph_out.trim().is_empty() {
+        let mut graph_out =
+            io::BufWriter::new(fs::File::create(params.refined_graph_out.clone())?);
+        if let Err(e) = print_active_subgraph(&graph, &del_subg, &mut graph_out) {
+            panic!(
+                "unable to write refined graph to {}: {}",
+                params.refined_graph_out.clone(),
+                e
+            );
+        }
+        //                log::info!("transforming paths..");
+        //                if let Err(e) =
+        //                    print_transformed_paths(&gfa, &graph, &transform, &del_subg, &mut graph_out)
+        //                {
+        //                    panic!(
+        //                        "unable to write refined graph paths to {}: {}",
+        //                        params.refined_graph_out.clone(),
+        //                        e
+        //                    );
+        //                };
+        log::info!("transforming walks..");
+        let data = io::BufReader::new(fs::File::open(&params.graph)?);
+        if let Err(e) =
+            parse_and_transform_walks(data, &transform, &node_lens, &mut graph_out)
+        {
+            panic!(
+                "unable to parse or write refined graph walks to {}: {}",
+                params.refined_graph_out.clone(),
+                e
+            );
         }
     }
     out.flush()?;
