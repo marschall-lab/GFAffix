@@ -3,8 +3,8 @@ use std::cmp::Ordering;
 use std::collections::VecDeque;
 use std::error::Error;
 use std::fs;
-use std::io::prelude::*;
 use std::io;
+use std::io::prelude::*;
 use std::str::{self, FromStr};
 
 /* crate use */
@@ -82,7 +82,6 @@ pub struct CollapseEventTracker {
     pub overlapping_events: usize,
     pub bubbles: usize,
     pub events: usize,
-
 }
 
 impl CollapseEventTracker {
@@ -92,7 +91,6 @@ impl CollapseEventTracker {
         shared_prefix_nodes: &Vec<Handle>,
         splitted_node_pairs: &Vec<(Handle, Option<Handle>)>,
     ) {
-
         self.events += 1;
         let is_bubble = splitted_node_pairs.iter().all(|(_, x)| x.is_none());
         if is_bubble {
@@ -112,7 +110,7 @@ impl CollapseEventTracker {
 
             // orient transformation
             // important notice:
-            // - handle_graph::split_handle() works only in forward direction 
+            // - handle_graph::split_handle() works only in forward direction
             // - the first node of the split pair an will always be the node itself (again in
             //   forward direction)
             if v.is_reverse() {
@@ -127,31 +125,57 @@ impl CollapseEventTracker {
             if self.transform.contains_key(&v) {
                 self.overlapping_events += 1;
                 let us = self.transform.get_mut(&v).unwrap();
+                let old_rule = us
+                    .iter()
+                    .map(|u| {
+                        format!(
+                            "{}{}",
+                            if u.is_reverse() { '<' } else { '>' },
+                            u.unpack_number()
+                        )
+                    })
+                    .collect::<Vec<String>>()
+                    .join("");
                 match us.iter().position(|&u| u == v) {
                     Some(p) => {
                         us.remove(p);
                         for r in replacement.iter().rev() {
-                            us.insert(p, *r); 
+                            us.insert(p, *r);
                         }
-                    },
-                    None => panic!("cannot replace an {}, because it no longer exists",
-                        v.unpack_number())
+                    }
+                    None => panic!(
+                        "cannot replace an {}, because it no longer exists",
+                        v.unpack_number()
+                    ),
                 }
+                log::debug!(
+                    "update replacement rule for {} from {} to {}",
+                    v.unpack_number(),
+                    old_rule,
+                    us.iter()
+                        .map(|u| format!(
+                            "{}{}",
+                            if u.is_reverse() { '<' } else { '>' },
+                            u.unpack_number()
+                        ))
+                        .collect::<Vec<String>>()
+                        .join("")
+                );
             } else {
-                log::debug!("update replacement rule for {}", v.unpack_number());
+                log::debug!("new replacement rule for {}", v.unpack_number());
                 self.transform.insert(v, replacement.clone());
             }
         }
     }
 
     fn expand(&self, mut v: Handle) -> Vec<Handle> {
-        let mut res : Vec<Handle> = Vec::new();
+        let mut res: Vec<Handle> = Vec::new();
 
         let do_flip = v.is_reverse();
-        if do_flip{
+        if do_flip {
             v = v.flip();
         }
-        if self.transform.contains_key(&v){
+        if self.transform.contains_key(&v) {
             for u in self.transform.get(&v).unwrap() {
                 // if node appears in its expansion sequence, it must appear in forward direction
                 // by definition
@@ -175,17 +199,16 @@ impl CollapseEventTracker {
     }
 
     fn get_expanded_transformation(&self) -> FxHashMap<Handle, Vec<Handle>> {
-
         let mut res: FxHashMap<Handle, Vec<Handle>> = FxHashMap::default();
         res.reserve(self.transform.len());
 
         for v in self.transform.keys() {
             log::debug!("expanding node {} ... ", v.unpack_number());
             let vs = self.expand(*v);
-            log::debug!("deep-expansion of node {} to {} ", 
+            log::debug!(
+                "deep-expansion of node {} to {} ",
                 v.unpack_number(),
-                vs 
-                    .iter()
+                vs.iter()
                     .map(|w| format!(
                         "{}{}",
                         if w.is_reverse() { '<' } else { '>' },
@@ -208,9 +231,7 @@ impl CollapseEventTracker {
             events: 0,
         }
     }
-
 }
-
 
 fn enumerate_variant_preserving_shared_affixes(
     graph: &HashGraph,
@@ -241,7 +262,7 @@ fn enumerate_variant_preserving_shared_affixes(
     for ((_, parents), children) in branch.iter() {
         if children.len() > 1 {
             log::debug!(
-                "identified shared prefix between nodes {} originating from parents {}",
+                "identified shared prefix between nodes {} originating from parent(s) {}",
                 children
                     .iter()
                     .map(|v| format!(
@@ -287,13 +308,14 @@ fn collapse(
     // into <329203 and <1209) and then the forward oriented handle (e.g., truncated handle >1209
     // is split into >1209 and 329204), Subsequently, either >1209 or >329203 is deleted, with the
     // other being advanced as dedicated shared prefix node.
-    
+
     let mut shared_prefix_nodes = shared_prefix.shared_prefix_nodes.clone();
     shared_prefix_nodes.sort_by(|x, y| match (x.is_reverse(), y.is_reverse()) {
         (true, false) => Ordering::Less,
         (false, true) => Ordering::Greater,
-        _ => Ordering::Equal});
-    
+        _ => Ordering::Equal,
+    });
+
     // update graph in two passes:
     //  1. split handles into shared prefix and distinct suffix and appoint dedicated shared
     //  prefix node
@@ -406,7 +428,11 @@ fn collapse(
         }
     }
 
-    event_tracker.report(shared_prefix_node, &shared_prefix_nodes, &splitted_node_pairs);
+    event_tracker.report(
+        shared_prefix_node,
+        &shared_prefix_nodes,
+        &splitted_node_pairs,
+    );
 
     shared_prefix_node
 }
