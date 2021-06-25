@@ -534,7 +534,7 @@ fn find_and_report_variant_preserving_shared_affixes<W: Write>(
                         if affix.parents.iter().chain(affix.shared_prefix_nodes.iter()).any(|&u| {
                             event_tracker
                                 .modified_nodes
-                                .contains_key(&(u.unpack_number() as usize, graph.node_len(u)))
+                                .contains(&(u.unpack_number() as usize, graph.node_len(u)))
                         }) {
                             event_tracker.overlapping_events += 1
                         }
