@@ -180,6 +180,7 @@ impl CollapseEventTracker {
         res.reserve(self.transform.len());
 
         for v in self.transform.keys() {
+            log::debug!("expanding node {} ... ", v.unpack_number());
             let vs = self.expand(*v);
             log::debug!("deep-expansion of node {} to {} ", 
                 v.unpack_number(),
