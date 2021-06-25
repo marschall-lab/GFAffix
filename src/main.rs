@@ -954,13 +954,14 @@ fn main() -> Result<(), io::Error> {
         out,
         "{}",
         [
-            "original_node",
-            "transformed_path",
-            "bp_length",
-            "sequence",
+            "oriented_parent_nodes",
+            "oriented_child_nodes",
+            "prefix_length",
+            "prefix",
         ]
         .join("\t")
     )?;
+
     let (del_subg, event_tracker) = find_and_collapse_variant_preserving_shared_affixes(&mut graph, &mut out);
     let transform = event_tracker.get_expanded_transformation();
 
@@ -968,11 +969,25 @@ fn main() -> Result<(), io::Error> {
     let old_graph = HashGraph::from_gfa(&gfa);
     check_transform(&old_graph, &graph, &transform);
 
-    let mut trans_out =
-        io::BufWriter::new(fs::File::create(params.transformation_out.clone())?);
-    if let Err(e) = print_transformations(&transform, &node_lens, &mut trans_out) {
-        panic!("unable to write graph transformations to stdout: {}", e);
+    if !params.transformation_out.trim().is_empty() {
+        let mut trans_out =
+            io::BufWriter::new(fs::File::create(params.transformation_out.clone())?);
+        writeln!(
+            trans_out,
+            "{}",
+            [
+                "original_node",
+                "transformed_path",
+                "bp_length",
+                "sequence",
+            ]
+            .join("\t")
+        )?;
+        if let Err(e) = print_transformations(&transform, &node_lens, &mut trans_out) {
+            panic!("unable to write graph transformations to stdout: {}", e);
+        }
     }
+
 
     if !params.refined_graph_out.trim().is_empty() {
         let mut graph_out =
