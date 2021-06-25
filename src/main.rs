@@ -727,7 +727,7 @@ fn print_transformations<W: Write>(
         {
             writeln!(
                 out,
-                ">{}\t{}\t{}\t{}",
+                ">{}\t{}\t{}",
                 vid,
                 path.iter()
                     .map(|(rid, ro, _)| format!(
@@ -737,9 +737,7 @@ fn print_transformations<W: Write>(
                     ))
                     .collect::<Vec<String>>()
                     .join(""),
-                vlen,
-                String::from_utf8(spell_walk(graph, path)).unwrap()
-            )?;
+                vlen)?;
         }
     }
     Ok(())
