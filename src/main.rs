@@ -303,8 +303,7 @@ fn collapse(
         if v_len > prefix_len {
             // x corresponds to the shared prefix,
             let (x, u) = if v.is_reverse() {
-                // apparently, there's a bug in rs-handlegraph that prevents splitting nodes in
-                // reverse direction
+                // apparently, rs-handlegraph does not allow splitting nodes in reverse direction
                 let (u_rev, x_rev) = graph.split_handle(v.flip(), v_len - prefix_len);
                 (x_rev.flip(), u_rev.flip())
             } else {
@@ -338,7 +337,7 @@ fn collapse(
     //  2. update deleted edge set, reassign outgoing edges of "empty" nodes to dedicated shared
     //     prefix node
     // there will be always a shared prefix node, so this condition is always true
-    let shared_prefix_node = shared_prefix_nodes[shared_prefix_node_pos];
+    let shared_prefix_node = splitted_node_pairs[shared_prefix_node_pos].0;
     log::debug!(
         "node {}{} is dedicated shared prefix node",
         if shared_prefix_node.is_reverse() {
