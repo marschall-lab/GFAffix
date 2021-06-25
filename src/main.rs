@@ -797,6 +797,7 @@ fn main() -> Result<(), io::Error> {
                     );
                 }
                 let transform = event_tracker.get_expanded_transformation();
+                log::info!("transforming paths..");
                 if let Err(e) =
                     print_transformed_paths(&gfa, &graph, &transform, &del_subg, &mut graph_out)
                 {
@@ -806,6 +807,7 @@ fn main() -> Result<(), io::Error> {
                         e
                     );
                 };
+                log::info!("transforming walks..");
                 let data = io::BufReader::new(fs::File::open(&params.graph)?);
                 if let Err(e) =
                     parse_and_transform_walks(data, &graph, &transform, &del_subg, &mut graph_out)
