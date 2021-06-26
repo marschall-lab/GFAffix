@@ -603,42 +603,6 @@ fn transform_path(
     res
 }
 
-//fn check_path(_graph: &HashGraph, del_subg: &DeletedSubGraph, path: &Vec<(usize, Orientation)>) {
-//    for j in 1..path.len() {
-//        let i = j - 1;
-//        let u = Handle::new(path[i].0, path[i].1);
-//        let v = Handle::new(path[j].0, path[j].1);
-//
-//        //        if !graph.has_edge(u, v) {
-//        //            panic!(
-//        //                "edge {}{}{}{} is not part of the graph",
-//        //                if u.is_reverse() { '<' } else { '>' },
-//        //                u.unpack_number(),
-//        //                if v.is_reverse() { '<' } else { '>' },
-//        //                v.unpack_number()
-//        //            );
-//        //        } else if del_subg.edge_deleted(&u, &v) {
-//        //            panic!(
-//        //                "edge {}{}{}{} is deleted",
-//        //                if u.is_reverse() { '<' } else { '>' },
-//        //                u.unpack_number(),
-//        //                if v.is_reverse() { '<' } else { '>' },
-//        //                v.unpack_number()
-//        //            );
-//        //        }
-//        if del_subg.node_deleted(&u) || del_subg.node_deleted(&v) {
-//            panic!(
-//                "either node {}{} or {}{} or both are deleted",
-//                if u.is_reverse() { '<' } else { '>' },
-//                u.unpack_number(),
-//                if v.is_reverse() { '<' } else { '>' },
-//                v.unpack_number()
-//            );
-//        }
-//    }
-//}
-
-
 fn print_active_subgraph<W: io::Write>(
     graph: &HashGraph,
     del_subg: &DeletedSubGraph,
@@ -807,35 +771,33 @@ fn print<W: io::Write>(affix: &AffixSubgraph, out: &mut io::BufWriter<W>) -> Res
 }
 
 
-//fn print_transformed_paths<W: io::Write>(
-//    gfa: &GFA<usize, ()>,
-//    graph: &HashGraph,
-//    transform: &FxHashMap<Handle, Vec<Handle>>,
-//    del_subg: &DeletedSubGraph,
-//    out: &mut io::BufWriter<W>,
-//) -> Result<(), Box<dyn Error>> {
-//    for path in gfa.paths.iter() {
-//        log::debug!("transforming path {}", str::from_utf8(&path.path_name)?);
-//        let tpath = transform_path(&path.iter().collect(), &transform);
-//        check_path(graph, del_subg, &tpath);
-//        writeln!(
-//            out,
-//            "P\t{}\t{}\t*",
-//            str::from_utf8(&path.path_name)?,
-//            tpath
-//                .iter()
-//                .map(|(sid, o)| format!(
-//                    "{}{}",
-//                    sid,
-//                    if *o == Orientation::Forward { '+' } else { '-' }
-//                ))
-//                .collect::<Vec<String>>()
-//                .join(",")
-//        )?;
-//    }
-//
-//    Ok(())
-//}
+fn parse_and_transform_paths<W: io::Write>(
+    gfa: &GFA<usize, ()>,
+    orig_node_lens: &FxHashMap<usize, usize>,
+    transform: &FxHashMap<(usize, usize), Vec<(usize, Direction, usize)>>,
+    out: &mut io::BufWriter<W>,
+) -> Result<(), Box<dyn Error>> {
+    for path in gfa.paths.iter() {
+        log::debug!("transforming path {}", str::from_utf8(&path.path_name)?);
+        let tpath = transform_path(&path.iter().map(|(sid, o)| (sid, match o {Orientation::Forward => Direction::Right, Orientation::Backward => Direction::Left}, *orig_node_lens.get(&sid).unwrap())) .collect(), &transform);
+        writeln!(
+            out,
+            "P\t{}\t{}\t*",
+            str::from_utf8(&path.path_name)?,
+            tpath
+                .iter()
+                .map(|(sid, o)| format!(
+                    "{}{}",
+                    sid,
+                    if *o == Direction::Right { '+' } else { '-' }
+                ))
+                .collect::<Vec<String>>()
+                .join(",")
+        )?;
+    }
+
+    Ok(())
+}
 
 fn parse_and_transform_walks<W: io::Write, R: io::Read>(
     mut data: io::BufReader<R>,
@@ -1004,16 +966,16 @@ fn main() -> Result<(), io::Error> {
                 e
             );
         }
-        //                log::info!("transforming paths..");
-        //                if let Err(e) =
-        //                    print_transformed_paths(&gfa, &graph, &transform, &del_subg, &mut graph_out)
-        //                {
-        //                    panic!(
-        //                        "unable to write refined graph paths to {}: {}",
-        //                        params.refined_graph_out.clone(),
-        //                        e
-        //                    );
-        //                };
+        log::info!("transforming paths");
+        if let Err(e) =
+            parse_and_transform_paths(&gfa, &node_lens, &transform, &mut graph_out)
+        {
+            panic!(
+                "unable to write refined graph paths to {}: {}",
+                params.refined_graph_out.clone(),
+                e
+            );
+        };
         log::info!("transforming walks");
         let data = io::BufReader::new(fs::File::open(&params.graph)?);
         if let Err(e) =
