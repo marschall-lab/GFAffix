@@ -14,14 +14,17 @@ Discover path-preserving shared prefixes in multifurcations of a given graph.
     - Log output not informative enough? Try 'RUST_LOG=debug gfaffix ...'
 
 USAGE:
-    gfaffix [OPTIONS] <graph>
+    gfaffix [FLAGS] [OPTIONS] <graph>
 
 ARGS:
     <graph>    graph in GFA1 format
 
 FLAGS:
-    -h, --help       Prints help information
-    -V, --version    Prints version information
+    -c, --check_transformation    Verifies that the transformed parts of the graphs spell out the
+                                  identical sequence as in the original graph. Only for debugging
+                                  purposes.
+    -h, --help                    Prints help information
+    -V, --version                 Prints version information
 
 OPTIONS:
     -o, --output_refined <refined-graph-out>
