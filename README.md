@@ -8,10 +8,13 @@ $ cargo build --manifest-path GFAffix/Cargo.toml --release
 $ ./GFAffix/target/release/gfaffix --help
 gfaffix 0.1
 Daniel Doerr <daniel.doerr@hhu.de>
-Identify shared suffixes/prefixes in branchings
+Discover path-preserving shared prefixes in multifurcations of a given graph.
+
+    - Do you want log output? Call program with 'RUST_LOG=info gfaffix ...'
+    - Log output not informative enough? Try 'RUST_LOG=debug gfaffix ...'
 
 USAGE:
-    gfaffix <graph>
+    gfaffix [OPTIONS] <graph>
 
 ARGS:
     <graph>    graph in GFA1 format
@@ -20,6 +23,13 @@ FLAGS:
     -h, --help       Prints help information
     -V, --version    Prints version information
 
+OPTIONS:
+    -o, --output_refined <refined-graph-out>
+            write refined graph in GFA1 format to supplied file [default:  ]
+
+    -t, --output_transformation <transformation-out>
+            report original nodes and their corresponding paths in refined graph to supplied file
+            [default:  ]
 ```
 
 
