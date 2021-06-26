@@ -941,6 +941,8 @@ fn main() -> Result<(), io::Error> {
 
     log::info!("constructing handle graph");
     let mut graph = HashGraph::from_gfa(&gfa);
+    
+    graph.paths.clear();
 
     log::info!("storing length of original nodes for bookkeeping");
     let mut node_lens: FxHashMap<usize, usize> = FxHashMap::default();
@@ -965,11 +967,13 @@ fn main() -> Result<(), io::Error> {
     let (del_subg, event_tracker) = find_and_collapse_variant_preserving_shared_affixes(&mut graph, &mut out);
     let transform = event_tracker.get_expanded_transformation();
 
-    // check transformation
+    log::info!("checking correctness of applied transformations...");
     let old_graph = HashGraph::from_gfa(&gfa);
     check_transform(&old_graph, &graph, &transform);
+    log::info!("all correct!");
 
     if !params.transformation_out.trim().is_empty() {
+        log::info!("writing transformations to {}", params.transformation_out);
         let mut trans_out =
             io::BufWriter::new(fs::File::create(params.transformation_out.clone())?);
         writeln!(
@@ -990,6 +994,7 @@ fn main() -> Result<(), io::Error> {
 
 
     if !params.refined_graph_out.trim().is_empty() {
+        log::info!("writing refined graph to {}", params.refined_graph_out);
         let mut graph_out =
             io::BufWriter::new(fs::File::create(params.refined_graph_out.clone())?);
         if let Err(e) = print_active_subgraph(&graph, &del_subg, &mut graph_out) {
@@ -1009,7 +1014,7 @@ fn main() -> Result<(), io::Error> {
         //                        e
         //                    );
         //                };
-        log::info!("transforming walks..");
+        log::info!("transforming walks");
         let data = io::BufReader::new(fs::File::open(&params.graph)?);
         if let Err(e) =
             parse_and_transform_walks(data, &transform, &node_lens, &mut graph_out)
