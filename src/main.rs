@@ -674,7 +674,7 @@ fn check_transform(
             );
         }
 
-        let v = Handle::new(*vid, Orientation::Forward);
+        let v = Handle::pack(*vid, false);
         if old_graph.has_node(v.id()) && old_graph.node_len(v) == *vlen {
             let old_seq = old_graph.sequence_vec(v);
             let new_seq = spell_walk(new_graph, path);
@@ -738,13 +738,7 @@ fn spell_walk(graph: &HashGraph, walk: &Vec<(usize, Direction, usize)>) -> Vec<u
 
     let mut prev_v: Option<Handle> = None;
     for (i, (sid, o, _)) in walk.iter().enumerate() {
-        let v = Handle::new(
-            *sid,
-            match o {
-                Direction::Right => Orientation::Forward,
-                Direction::Left => Orientation::Backward,
-            },
-        );
+        let v = Handle::pack(*sid, *o == Direction::Right);
         if i >= 1 && !graph.has_edge(prev_v.unwrap(), v) {
             panic!("graph does not have edge {:?}-{:?}", &walk[i - 1], &walk[i]);
         }
@@ -944,6 +938,7 @@ fn main() -> Result<(), io::Error> {
     log::info!("constructing handle graph");
     let mut graph = HashGraph::from_gfa(&gfa);
 
+    log::debug!("handlegraph has {} edges", graph.edge_count());
     graph.paths.clear();
 
     log::info!("storing length of original nodes for bookkeeping");
