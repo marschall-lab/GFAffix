@@ -618,6 +618,7 @@ fn print_active_subgraph<W: io::Write>(
     del_subg: &DeletedSubGraph,
     out: &mut io::BufWriter<W>,
 ) -> Result<(), Box<dyn Error>> {
+    writeln!(out, "H\tVN:Z:1.0")?;
     for v in graph.handles() {
         if !del_subg.node_deleted(&v) {
             writeln!(
@@ -673,7 +674,7 @@ fn check_transform(
             );
         }
 
-        let v = Handle::new(*vid, Orientation::Forward);
+        let v = Handle::pack(*vid, false);
         if old_graph.has_node(v.id()) && old_graph.node_len(v) == *vlen {
             let old_seq = old_graph.sequence_vec(v);
             let new_seq = spell_walk(new_graph, path);
@@ -701,6 +702,12 @@ fn print_transformations<W: Write>(
     orig_node_lens: &FxHashMap<usize, usize>,
     out: &mut io::BufWriter<W>,
 ) -> Result<(), io::Error> {
+    writeln!(
+        out,
+        "{}",
+        ["original_node", "transformed_path", "bp_length"].join("\t")
+    )?;
+
     for ((vid, vlen), path) in transform.iter() {
         if match orig_node_lens.get(vid) {
             Some(l) => l == vlen,
@@ -709,7 +716,7 @@ fn print_transformations<W: Write>(
         {
             writeln!(
                 out,
-                ">{}\t{}\t{}",
+                "{}\t{}\t{}",
                 vid,
                 path.iter()
                     .map(|(rid, ro, _)| format!(
@@ -731,13 +738,7 @@ fn spell_walk(graph: &HashGraph, walk: &Vec<(usize, Direction, usize)>) -> Vec<u
 
     let mut prev_v: Option<Handle> = None;
     for (i, (sid, o, _)) in walk.iter().enumerate() {
-        let v = Handle::new(
-            *sid,
-            match o {
-                Direction::Right => Orientation::Forward,
-                Direction::Left => Orientation::Backward,
-            },
-        );
+        let v = Handle::pack(*sid, *o != Direction::Right);
         if i >= 1 && !graph.has_edge(prev_v.unwrap(), v) {
             panic!("graph does not have edge {:?}-{:?}", &walk[i - 1], &walk[i]);
         }
@@ -807,7 +808,7 @@ fn parse_and_transform_paths<W: io::Write>(
         );
         writeln!(
             out,
-            "P\t{}\t{}\t*",
+            "P\t{}\t{}\t{}",
             str::from_utf8(&path.path_name)?,
             tpath
                 .iter()
@@ -817,7 +818,15 @@ fn parse_and_transform_paths<W: io::Write>(
                     if *o == Direction::Right { '+' } else { '-' }
                 ))
                 .collect::<Vec<String>>()
-                .join(",")
+                .join(","),
+            path.overlaps
+                .iter()
+                .map(|x| match x {
+                    None => "*".to_string(),
+                    Some(c) => c.to_string(),
+                })
+                .collect::<Vec<String>>()
+                .join("")
         )?;
     }
 
@@ -929,6 +938,7 @@ fn main() -> Result<(), io::Error> {
     log::info!("constructing handle graph");
     let mut graph = HashGraph::from_gfa(&gfa);
 
+    log::debug!("handlegraph has {} edges", graph.edge_count());
     graph.paths.clear();
 
     log::info!("storing length of original nodes for bookkeeping");
@@ -966,11 +976,6 @@ fn main() -> Result<(), io::Error> {
         log::info!("writing transformations to {}", params.transformation_out);
         let mut trans_out =
             io::BufWriter::new(fs::File::create(params.transformation_out.clone())?);
-        writeln!(
-            trans_out,
-            "{}",
-            ["original_node", "transformed_path", "bp_length", "sequence",].join("\t")
-        )?;
         if let Err(e) = print_transformations(&transform, &node_lens, &mut trans_out) {
             panic!("unable to write graph transformations to stdout: {}", e);
         }
@@ -987,18 +992,20 @@ fn main() -> Result<(), io::Error> {
             );
         }
         log::info!("transforming paths");
-        if let Err(e) = parse_and_transform_paths(&gfa, &node_lens, &transform, &mut graph_out) {
+        if let Err(e) = parse_and_transform_paths(&gfa, &node_lens, &transform, &mut graph_out)
+        {
             panic!(
-                "unable to write refined graph paths to {}: {}",
+                "unable to write refined GFA path lines to {}: {}",
                 params.refined_graph_out.clone(),
                 e
             );
         };
         log::info!("transforming walks");
         let data = io::BufReader::new(fs::File::open(&params.graph)?);
-        if let Err(e) = parse_and_transform_walks(data, &transform, &node_lens, &mut graph_out) {
+        if let Err(e) = parse_and_transform_walks(data, &transform, &node_lens, &mut graph_out)
+        {
             panic!(
-                "unable to parse or write refined graph walks to {}: {}",
+                "unable to parse or write refined GFA walk lines  to {}: {}",
                 params.refined_graph_out.clone(),
                 e
             );
