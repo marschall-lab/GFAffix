@@ -738,7 +738,7 @@ fn spell_walk(graph: &HashGraph, walk: &Vec<(usize, Direction, usize)>) -> Vec<u
 
     let mut prev_v: Option<Handle> = None;
     for (i, (sid, o, _)) in walk.iter().enumerate() {
-        let v = Handle::pack(*sid, *o == Direction::Right);
+        let v = Handle::pack(*sid, *o != Direction::Right);
         if i >= 1 && !graph.has_edge(prev_v.unwrap(), v) {
             panic!("graph does not have edge {:?}-{:?}", &walk[i - 1], &walk[i]);
         }
