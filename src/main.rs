@@ -618,6 +618,7 @@ fn print_active_subgraph<W: io::Write>(
     del_subg: &DeletedSubGraph,
     out: &mut io::BufWriter<W>,
 ) -> Result<(), Box<dyn Error>> {
+    writeln!(out, "H\tVN:Z:1.0")?;
     for v in graph.handles() {
         if !del_subg.node_deleted(&v) {
             writeln!(
@@ -807,7 +808,7 @@ fn parse_and_transform_paths<W: io::Write>(
         );
         writeln!(
             out,
-            "P\t{}\t{}\t*",
+            "P\t{}\t{}\t{}",
             str::from_utf8(&path.path_name)?,
             tpath
                 .iter()
@@ -817,7 +818,15 @@ fn parse_and_transform_paths<W: io::Write>(
                     if *o == Direction::Right { '+' } else { '-' }
                 ))
                 .collect::<Vec<String>>()
-                .join(",")
+                .join(","),
+            path.overlaps
+                .iter()
+                .map(|x| match x {
+                    None => "*".to_string(),
+                    Some(c) => c.to_string(),
+                })
+                .collect::<Vec<String>>()
+                .join("")
         )?;
     }
 
