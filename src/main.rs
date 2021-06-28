@@ -989,41 +989,31 @@ fn main() -> Result<(), io::Error> {
     if !params.refined_graph_out.trim().is_empty() {
         log::info!("writing refined graph to {}", params.refined_graph_out);
         let mut graph_out = io::BufWriter::new(fs::File::create(params.refined_graph_out.clone())?);
-        if transform.is_empty() {
-            log::info!("no shared prefix detected, graph is already fully collapsed");
-            log::info!("pasting original graph to {}", params.refined_graph_out);
-            let mut buf: [u8; 8000000] = [0; 8000000];
-            let mut orig_f = fs::File::open(params.graph)?;
-            while let Ok(l) = orig_f.read(&mut buf) {
-                graph_out.write(&buf[..l])?;
-            }
-        } else {
-            if let Err(e) = print_active_subgraph(&graph, &del_subg, &mut graph_out) {
-                panic!(
-                    "unable to write refined graph to {}: {}",
-                    params.refined_graph_out.clone(),
-                    e
-                );
-            }
-            log::info!("transforming paths");
-            if let Err(e) = parse_and_transform_paths(&gfa, &node_lens, &transform, &mut graph_out)
-            {
-                panic!(
-                    "unable to write refined GFA path lines to {}: {}",
-                    params.refined_graph_out.clone(),
-                    e
-                );
-            };
-            log::info!("transforming walks");
-            let data = io::BufReader::new(fs::File::open(&params.graph)?);
-            if let Err(e) = parse_and_transform_walks(data, &transform, &node_lens, &mut graph_out)
-            {
-                panic!(
-                    "unable to parse or write refined GFA walk lines  to {}: {}",
-                    params.refined_graph_out.clone(),
-                    e
-                );
-            }
+        if let Err(e) = print_active_subgraph(&graph, &del_subg, &mut graph_out) {
+            panic!(
+                "unable to write refined graph to {}: {}",
+                params.refined_graph_out.clone(),
+                e
+            );
+        }
+        log::info!("transforming paths");
+        if let Err(e) = parse_and_transform_paths(&gfa, &node_lens, &transform, &mut graph_out)
+        {
+            panic!(
+                "unable to write refined GFA path lines to {}: {}",
+                params.refined_graph_out.clone(),
+                e
+            );
+        };
+        log::info!("transforming walks");
+        let data = io::BufReader::new(fs::File::open(&params.graph)?);
+        if let Err(e) = parse_and_transform_walks(data, &transform, &node_lens, &mut graph_out)
+        {
+            panic!(
+                "unable to parse or write refined GFA walk lines  to {}: {}",
+                params.refined_graph_out.clone(),
+                e
+            );
         }
     }
     out.flush()?;
