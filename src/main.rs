@@ -702,6 +702,12 @@ fn print_transformations<W: Write>(
     orig_node_lens: &FxHashMap<usize, usize>,
     out: &mut io::BufWriter<W>,
 ) -> Result<(), io::Error> {
+    writeln!(
+        out,
+        "{}",
+        ["original_node", "transformed_path", "bp_length"].join("\t")
+    )?;
+
     for ((vid, vlen), path) in transform.iter() {
         if match orig_node_lens.get(vid) {
             Some(l) => l == vlen,
@@ -710,7 +716,7 @@ fn print_transformations<W: Write>(
         {
             writeln!(
                 out,
-                ">{}\t{}\t{}",
+                "{}\t{}\t{}",
                 vid,
                 path.iter()
                     .map(|(rid, ro, _)| format!(
@@ -975,11 +981,6 @@ fn main() -> Result<(), io::Error> {
         log::info!("writing transformations to {}", params.transformation_out);
         let mut trans_out =
             io::BufWriter::new(fs::File::create(params.transformation_out.clone())?);
-        writeln!(
-            trans_out,
-            "{}",
-            ["original_node", "transformed_path", "bp_length", "sequence",].join("\t")
-        )?;
         if let Err(e) = print_transformations(&transform, &node_lens, &mut trans_out) {
             panic!("unable to write graph transformations to stdout: {}", e);
         }
@@ -1008,7 +1009,7 @@ fn main() -> Result<(), io::Error> {
             if let Err(e) = parse_and_transform_paths(&gfa, &node_lens, &transform, &mut graph_out)
             {
                 panic!(
-                    "unable to write refined graph paths to {}: {}",
+                    "unable to write refined GFA path lines to {}: {}",
                     params.refined_graph_out.clone(),
                     e
                 );
@@ -1018,7 +1019,7 @@ fn main() -> Result<(), io::Error> {
             if let Err(e) = parse_and_transform_walks(data, &transform, &node_lens, &mut graph_out)
             {
                 panic!(
-                    "unable to parse or write refined graph walks to {}: {}",
+                    "unable to parse or write refined GFA walk lines  to {}: {}",
                     params.refined_graph_out.clone(),
                     e
                 );
