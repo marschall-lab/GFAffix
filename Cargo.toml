@@ -10,7 +10,11 @@ edition = "2018"
 bstr       = "0.2" 
 clap        = "3.0.0-beta.2"
 rustc-hash = "1"
-handlegraph = "0.7.0-alpha.7"
+# rs-handlegraph has a critical bug that causes some edges to be ignored. This
+# is fixed in the repsitory, but not yet in a release. Until that happens, use
+# the version from the repository (https://github.com/chfi/rs-handlegraph.git)
+handlegraph = { path = "../rs-handlegraph/" }
+#handlegraph = "0.7.0-alpha.7"
 gfa         = "0.10"
 quick-csv  = "0.1.6"
 
