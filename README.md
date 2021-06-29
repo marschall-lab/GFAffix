@@ -1,11 +1,34 @@
 # GFAffix
 
-## How to get started
+# Dependencies
+
+`GFAffix` is written in RUST and requires a working RUST build system for
+installation. See
+[https://www.rust-lang.org/tools/install](https://www.rust-lang.org/tools/install)
+for more details. 
+
+It makes use of the following crates:
+* clap
+* env\_logger
+* gfa
+* handlegraph
+* log
+* quick-csv
+* rustc-hash
+
+## Installation
+
+### From repository
 
 ```
-$ git clone https://github.com/danydoerr/GFAffix.git
-$ cargo build --manifest-path GFAffix/Cargo.toml --release
-$ ./GFAffix/target/release/gfaffix --help
+git clone https://github.com/danydoerr/GFAffix.git
+cargo build --manifest-path GFAffix/Cargo.toml --release
+```
+
+## Command Line Interface
+
+```
+./GFAffix/target/release/gfaffix --help
 gfaffix 0.1
 Daniel Doerr <daniel.doerr@hhu.de>
 Discover path-preserving shared prefixes in multifurcations of a given graph.
@@ -35,4 +58,8 @@ OPTIONS:
             [default:  ]
 ```
 
+## Execution
 
+```
+RUST_LOG=info gfaffix examples/example1.gfa -o example1.gfa -t example1.trans > example1.shared_affixes
+```
