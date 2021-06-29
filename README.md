@@ -21,14 +21,32 @@ It makes use of the following crates:
 ### From repository
 
 ```
+# install rs-handlegraph from repository
+git clone https://github.com/chfi/rs-handlegraph.git
+cargo build --manifest-path rs-handlegraph/Cargo.toml --release
+
+# install GFAffix
 git clone https://github.com/danydoerr/GFAffix.git
 cargo build --manifest-path GFAffix/Cargo.toml --release
+```
+
+### From release
+
+```
+
+# install rs-handlegraph from repository
+git clone https://github.com/chfi/rs-handlegraph.git
+
+wget --no-check-certificate -c https://github.com/danydoerr/GFAffix/archive/refs/tags/0.1.tar.gz
+tar -xzvf 0.1.tar.gz
+cargo build --manifest-path GFAffix-0.1/Cargo.toml --release
+
 ```
 
 ## Command Line Interface
 
 ```
-./GFAffix/target/release/gfaffix --help
+$ gfaffix --help
 gfaffix 0.1
 Daniel Doerr <daniel.doerr@hhu.de>
 Discover path-preserving shared prefixes in multifurcations of a given graph.
