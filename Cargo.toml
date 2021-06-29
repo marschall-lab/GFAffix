@@ -7,7 +7,6 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-bstr       = "0.2" 
 clap        = "3.0.0-beta.2"
 rustc-hash = "1"
 # rs-handlegraph has a critical bug that causes some edges to be ignored. This
@@ -20,6 +19,4 @@ quick-csv  = "0.1.6"
 
 # Logging and error management
 log        = "0.4"
-anyhow     = "1"
-thiserror  = "1"
 env_logger = "0.7"
