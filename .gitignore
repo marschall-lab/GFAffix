@@ -1,0 +1,6 @@
+**/*.swo
+**/*.swp
+Cargo.lock
+doc/*.aux
+doc/*.log
+target/**
