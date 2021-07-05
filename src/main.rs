@@ -81,16 +81,16 @@ impl DeletedSubGraph {
     }
 
     fn edge_deleted(&self, u: &Handle, v: &Handle) -> bool {
-        let mut res : bool;
-        if u.is_reverse() { 
+        let mut res: bool;
+        if u.is_reverse() {
             res = self.nodes.contains(&u.flip());
         } else {
             res = self.nodes.contains(u);
         }
-        if v.is_reverse() { 
-             res |= self.nodes.contains(&v.flip())
-         } else { 
-             res |= self.nodes.contains(v) 
+        if v.is_reverse() {
+            res |= self.nodes.contains(&v.flip())
+        } else {
+            res |= self.nodes.contains(v)
         }
 
         res
@@ -116,12 +116,13 @@ pub struct CollapseEventTracker {
     // tranform from (node_id, node_len) -> [(node_id, node_orient, node_len), ..]
     //                ^ keys are always forward oriented
     pub transform: FxHashMap<(usize, usize), Vec<(usize, Direction, usize)>>,
-    pub edge_labels: FxHashMap<(usize, Direction, usize), usize>,
     pub overlapping_events: usize,
     pub bubbles: usize,
     pub events: usize,
 
     modified_nodes: FxHashSet<(usize, usize)>,
+    edge_labels: FxHashMap<(Handle, Handle), Vec<usize>>,
+    split_id_tracker: usize,
 }
 
 impl CollapseEventTracker {
@@ -196,6 +197,48 @@ impl CollapseEventTracker {
             );
             self.transform
                 .insert((*node_id, *node_len), replacement.clone());
+        }
+    }
+
+    fn new_split_id(&mut self) -> usize {
+        self.split_id_tracker += 1;
+
+        self.split_id_tracker - 1
+    }
+
+    fn assign_split_id(&mut self, u: Handle, v: Handle, id: usize) {
+        let e = CollapseEventTracker::canonize_edge(u, v);
+        self.edge_labels.entry(e).or_insert(Vec::new()).push(id);
+    }
+
+    fn split_handle(
+        &mut self,
+        graph: &mut HashGraph,
+        v: Handle,
+        position: usize,
+    ) -> (Handle, Handle) {
+        let v_len = graph.node_len(v);
+        if v.is_reverse() {
+            // apparently, rs-handlegraph does not allow splitting nodes in reverse direction
+            let (u_rev, x_rev) = graph.split_handle(v.flip(), v_len - position);
+            self.update_outgoing_edge_annotation(graph, v, x_rev);
+
+            (x_rev.flip(), u_rev.flip())
+        } else {
+            let (x, u) = graph.split_handle(v, position);
+            self.update_outgoing_edge_annotation(graph, v, u);
+
+            (x, u)
+        }
+    }
+
+    fn update_outgoing_edge_annotation(&mut self, graph: &HashGraph, old: Handle, new: Handle) {
+        for w in graph.neighbors(new, Direction::Right) {
+            let e = CollapseEventTracker::canonize_edge(old, w);
+            if let Some(val) = self.edge_labels.remove(&e) {
+                let f = CollapseEventTracker::canonize_edge(new, w);
+                self.edge_labels.insert(f, val);
+            }
         }
     }
 
@@ -282,7 +325,12 @@ impl CollapseEventTracker {
             bubbles: 0,
             events: 0,
             modified_nodes: FxHashSet::default(),
+            split_id_tracker: 0,
         }
+    }
+
+    fn canonize_edge(u: Handle, v: Handle) -> (Handle, Handle) {
+        std::cmp::min((u, v), (v.flip(), u.flip()))
     }
 }
 
@@ -389,14 +437,7 @@ fn collapse(
             Direction::Right
         };
         if v_len > prefix_len {
-            // x corresponds to the shared prefix,
-            let (x, u) = if v.is_reverse() {
-                // apparently, rs-handlegraph does not allow splitting nodes in reverse direction
-                let (u_rev, x_rev) = graph.split_handle(v.flip(), v_len - prefix_len);
-                (x_rev.flip(), u_rev.flip())
-            } else {
-                graph.split_handle(*v, prefix_len)
-            };
+            let (x, u) = event_tracker.split_handle(graph, *v, prefix_len);
             splitted_node_pairs.push((
                 node_id,
                 node_orient,
@@ -442,16 +483,24 @@ fn collapse(
         shared_prefix_node.unpack_number()
     );
 
+    // before re-wiring edes to the shared prefix node, let's first assign a split ID to its
+    // existing outgoing edges
+    let shared_prefix_node_i = event_tracker.new_split_id();
+    for v in graph.neighbors(shared_prefix_node, Direction::Right) {
+        event_tracker.assign_split_id(shared_prefix_node, v, shared_prefix_node_i);
+    }
+
     for (_, _, _, u, maybe_v) in splitted_node_pairs.iter() {
         if *u != shared_prefix_node {
             // rewrire outgoing edges
             match maybe_v {
                 Some((v, _)) => {
-                    // make all suffixes spring from shared suffix node
+                    // make all suffixes spring from shared suffix node 
+                    let i = event_tracker.new_split_id();
                     if !graph.has_edge(shared_prefix_node, *v) {
                         graph.create_edge(Edge(shared_prefix_node, *v));
                         log::debug!(
-                            "create edge {}{}{}{}",
+                            "create edge {}{}{}{} with split-id {}",
                             if shared_prefix_node.is_reverse() {
                                 '<'
                             } else {
@@ -459,9 +508,12 @@ fn collapse(
                             },
                             shared_prefix_node.unpack_number(),
                             if v.is_reverse() { '<' } else { '>' },
-                            v.unpack_number()
+                            v.unpack_number(),
+                            i
                         );
                     }
+                    // split id of the re-wired edge
+                    event_tracker.assign_split_id(shared_prefix_node, *v, i);
                 }
                 None => {
                     // if node coincides with shared prefix (but is not the dedicated shared prefix
@@ -471,11 +523,12 @@ fn collapse(
                         .neighbors(*u, Direction::Right)
                         .filter(|v| !del_subg.edge_deleted(&u, v))
                         .collect();
+                    let i = event_tracker.new_split_id();
                     for w in outgoing_edges {
                         if !graph.has_edge(shared_prefix_node, w) {
                             graph.create_edge(Edge(shared_prefix_node, w));
                             log::debug!(
-                                "create edge {}{}{}{}",
+                                "create edge {}{}{}{} with split-id {}",
                                 if shared_prefix_node.is_reverse() {
                                     '<'
                                 } else {
@@ -483,9 +536,11 @@ fn collapse(
                                 },
                                 shared_prefix_node.unpack_number(),
                                 if w.is_reverse() { '<' } else { '>' },
-                                w.unpack_number()
+                                w.unpack_number(),
+                                i
                             );
                         }
+                        event_tracker.assign_split_id(shared_prefix_node, w, i);
                     }
                 }
             }
@@ -496,7 +551,7 @@ fn collapse(
                 u.unpack_number()
             );
             del_subg.add(*u);
-        }
+        } 
     }
 
     event_tracker.report(
@@ -1014,8 +1069,7 @@ fn main() -> Result<(), io::Error> {
             );
         }
         log::info!("transforming paths");
-        if let Err(e) = parse_and_transform_paths(&gfa, &node_lens, &transform, &mut graph_out)
-        {
+        if let Err(e) = parse_and_transform_paths(&gfa, &node_lens, &transform, &mut graph_out) {
             panic!(
                 "unable to write refined GFA path lines to {}: {}",
                 params.refined_graph_out.clone(),
@@ -1024,8 +1078,7 @@ fn main() -> Result<(), io::Error> {
         };
         log::info!("transforming walks");
         let data = io::BufReader::new(fs::File::open(&params.graph)?);
-        if let Err(e) = parse_and_transform_walks(data, &transform, &node_lens, &mut graph_out)
-        {
+        if let Err(e) = parse_and_transform_walks(data, &transform, &node_lens, &mut graph_out) {
             panic!(
                 "unable to parse or write refined GFA walk lines  to {}: {}",
                 params.refined_graph_out.clone(),
