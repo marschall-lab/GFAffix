@@ -73,15 +73,35 @@ pub struct DeletedSubGraph {
 
 impl DeletedSubGraph {
     fn add(&mut self, v: Handle) -> bool {
-        self.nodes.insert(v) | self.nodes.insert(v.flip())
+        if v.is_reverse() {
+            self.nodes.insert(v.flip())
+        } else {
+            self.nodes.insert(v)
+        }
     }
 
     fn edge_deleted(&self, u: &Handle, v: &Handle) -> bool {
-        self.nodes.contains(u) || self.nodes.contains(v)
+        let mut res : bool;
+        if u.is_reverse() { 
+            res = self.nodes.contains(&u.flip());
+        } else {
+            res = self.nodes.contains(u);
+        }
+        if v.is_reverse() { 
+             res |= self.nodes.contains(&v.flip())
+         } else { 
+             res |= self.nodes.contains(v) 
+        }
+
+        res
     }
 
     fn node_deleted(&self, v: &Handle) -> bool {
-        self.nodes.contains(v)
+        if v.is_reverse() {
+            self.nodes.contains(&v.flip())
+        } else {
+            self.nodes.contains(v)
+        }
     }
 
     fn new() -> Self {
@@ -96,6 +116,7 @@ pub struct CollapseEventTracker {
     // tranform from (node_id, node_len) -> [(node_id, node_orient, node_len), ..]
     //                ^ keys are always forward oriented
     pub transform: FxHashMap<(usize, usize), Vec<(usize, Direction, usize)>>,
+    pub edge_labels: FxHashMap<(usize, Direction, usize), usize>,
     pub overlapping_events: usize,
     pub bubbles: usize,
     pub events: usize,
@@ -256,6 +277,7 @@ impl CollapseEventTracker {
     fn new() -> Self {
         CollapseEventTracker {
             transform: FxHashMap::default(),
+            edge_labels: FxHashMap::default(),
             overlapping_events: 0,
             bubbles: 0,
             events: 0,
