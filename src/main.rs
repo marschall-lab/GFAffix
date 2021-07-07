@@ -369,23 +369,24 @@ fn prevent_collapse(
         .iter()
         .filter(|&x| no_collapse.contains(&(if x.is_reverse() { x.flip() } else { *x })))
         .collect::<Vec<&Handle>>();
+    let conflicting_nodes =  conflicting_nodes.into_iter().map(|&x| x).collect::<Vec<Handle>>();
 
     if conflicting_nodes.len() > 1 {
         // determine which non-collapsing node to keep
         let mut p = 0;
         for (i, v) in conflicting_nodes.iter().enumerate() {
-            if graph.node_len(**v) == prefix_len {
+            if graph.node_len(*v) == prefix_len {
                 p = i;
             }
         }
         // dedicated node
-        let v = *conflicting_nodes[p];
+        let v = conflicting_nodes[p];
 
         log::debug!(
             "nodes {} are in conflict with {}, therefore removing them from shared prefix list",
             conflicting_nodes
                 .iter()
-                .filter(|x| ***x != v)
+                .filter(|x| **x != v)
                 .map(|x| format!("{}", x.unpack_number()))
                 .collect::<Vec<String>>()
                 .join(","),
@@ -395,7 +396,7 @@ fn prevent_collapse(
         // remove all others from shared_prefix_nodes
         shared_prefix_nodes
             .into_iter()
-            .filter(|x| *x != v)
+            .filter(|x| *x == v || !conflicting_nodes.contains(&x))
             .collect::<Vec<Handle>>()
     } else {
         shared_prefix_nodes
