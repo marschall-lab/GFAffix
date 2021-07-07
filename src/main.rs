@@ -10,7 +10,7 @@ use std::str::{self, FromStr};
 /* crate use */
 use clap::Clap;
 use gfa::{
-    gfa::{orientation::Orientation, GFA},
+    gfa::{orientation::Orientation, Path, GFA},
     parser::GFAParser,
 };
 use handlegraph::{
@@ -57,6 +57,14 @@ pub struct Command {
         about = "Verifies that the transformed parts of the graphs spell out the identical sequence as in the original graph. Only for debugging purposes."
     )]
     pub check_transformation: bool,
+
+    #[clap(
+        short = 'x',
+        long = "dont_collapse",
+        about = "Do not collapse given set of paths",
+        default_value = " "
+    )]
+    pub no_collapse_path: Vec<String>,
 }
 
 // structure for storing reported subgraph
@@ -69,15 +77,21 @@ pub struct AffixSubgraph {
 #[derive(Clone, Debug)]
 pub struct DeletedSubGraph {
     pub nodes: FxHashSet<Handle>,
+    pub edges: FxHashSet<(Handle, Handle)>,
 }
 
 impl DeletedSubGraph {
-    fn add(&mut self, v: Handle) -> bool {
+    fn add_node(&mut self, v: Handle) -> bool {
         if v.is_reverse() {
             self.nodes.insert(v.flip())
         } else {
             self.nodes.insert(v)
         }
+    }
+
+
+    fn add_edge(&mut self, u: Handle, v: Handle) -> bool {
+        self.edges.insert(canonize_edge(u, v))
     }
 
     fn edge_deleted(&self, u: &Handle, v: &Handle) -> bool {
@@ -92,6 +106,7 @@ impl DeletedSubGraph {
         } else {
             res |= self.nodes.contains(v)
         }
+        res |= self.edges.contains(&canonize_edge(*u, *v));
 
         res
     }
@@ -107,6 +122,7 @@ impl DeletedSubGraph {
     fn new() -> Self {
         DeletedSubGraph {
             nodes: FxHashSet::default(),
+            edges: FxHashSet::default(),
         }
     }
 }
@@ -121,8 +137,7 @@ pub struct CollapseEventTracker {
     pub events: usize,
 
     modified_nodes: FxHashSet<(usize, usize)>,
-    edge_labels: FxHashMap<(Handle, Handle), Vec<usize>>,
-    split_id_tracker: usize,
+    edge_labels: FxHashMap<(Handle, Handle), FxHashSet<(usize, bool, usize)>>,
 }
 
 impl CollapseEventTracker {
@@ -200,15 +215,9 @@ impl CollapseEventTracker {
         }
     }
 
-    fn new_split_id(&mut self) -> usize {
-        self.split_id_tracker += 1;
-
-        self.split_id_tracker - 1
-    }
-
-    fn assign_split_id(&mut self, u: Handle, v: Handle, id: usize) {
-        let e = CollapseEventTracker::canonize_edge(u, v);
-        self.edge_labels.entry(e).or_insert(Vec::new()).push(id);
+    fn assign_split_label(&mut self, u: Handle, v: Handle, label: (usize, bool, usize)) {
+        let e = canonize_edge(u, v);
+        self.edge_labels.entry(e).or_insert(FxHashSet::default()).insert(label);
     }
 
     fn split_handle(
@@ -234,9 +243,9 @@ impl CollapseEventTracker {
 
     fn update_outgoing_edge_annotation(&mut self, graph: &HashGraph, old: Handle, new: Handle) {
         for w in graph.neighbors(new, Direction::Right) {
-            let e = CollapseEventTracker::canonize_edge(old, w);
+            let e = canonize_edge(old, w);
             if let Some(val) = self.edge_labels.remove(&e) {
-                let f = CollapseEventTracker::canonize_edge(new, w);
+                let f = canonize_edge(new, w);
                 self.edge_labels.insert(f, val);
             }
         }
@@ -325,13 +334,13 @@ impl CollapseEventTracker {
             bubbles: 0,
             events: 0,
             modified_nodes: FxHashSet::default(),
-            split_id_tracker: 0,
         }
     }
 
-    fn canonize_edge(u: Handle, v: Handle) -> (Handle, Handle) {
-        std::cmp::min((u, v), (v.flip(), u.flip()))
-    }
+}
+
+fn canonize_edge(u: Handle, v: Handle) -> (Handle, Handle) {
+    std::cmp::min((u, v), (v.flip(), u.flip()))
 }
 
 fn enumerate_path_preserving_shared_affixes(
@@ -472,7 +481,8 @@ fn collapse(
     //  2. update deleted edge set, reassign outgoing edges of "empty" nodes to dedicated shared
     //     prefix node
     // there will be always a shared prefix node, so this condition is always true
-    let shared_prefix_node = splitted_node_pairs[shared_prefix_node_pos].3;
+    let shared_prefix_split = splitted_node_pairs[shared_prefix_node_pos];
+    let shared_prefix_node = shared_prefix_split.3;
     log::debug!(
         "node {}{} is dedicated shared prefix node",
         if shared_prefix_node.is_reverse() {
@@ -483,24 +493,27 @@ fn collapse(
         shared_prefix_node.unpack_number()
     );
 
-    // before re-wiring edes to the shared prefix node, let's first assign a split ID to its
+    // before re-wiring edes to the shared prefix node, let's first assign a split label to its
     // existing outgoing edges
-    let shared_prefix_node_i = event_tracker.new_split_id();
+    let shared_split_label = (
+        shared_prefix_split.0,
+        shared_prefix_split.1 == Direction::Left,
+        shared_prefix_split.2,
+    );
     for v in graph.neighbors(shared_prefix_node, Direction::Right) {
-        event_tracker.assign_split_id(shared_prefix_node, v, shared_prefix_node_i);
+        event_tracker.assign_split_label(shared_prefix_node, v, shared_split_label);
     }
 
-    for (_, _, _, u, maybe_v) in splitted_node_pairs.iter() {
+    for (wid, wo, wl, u, maybe_v) in splitted_node_pairs.iter() {
         if *u != shared_prefix_node {
             // rewrire outgoing edges
             match maybe_v {
                 Some((v, _)) => {
-                    // make all suffixes spring from shared suffix node 
-                    let i = event_tracker.new_split_id();
+                    // make all suffixes spring from shared suffix node
                     if !graph.has_edge(shared_prefix_node, *v) {
                         graph.create_edge(Edge(shared_prefix_node, *v));
                         log::debug!(
-                            "create edge {}{}{}{} with split-id {}",
+                            "create edge {}{}{}{} with split-label {:?}",
                             if shared_prefix_node.is_reverse() {
                                 '<'
                             } else {
@@ -509,11 +522,11 @@ fn collapse(
                             shared_prefix_node.unpack_number(),
                             if v.is_reverse() { '<' } else { '>' },
                             v.unpack_number(),
-                            i
+                            (wid, wo, wl)
                         );
                     }
                     // split id of the re-wired edge
-                    event_tracker.assign_split_id(shared_prefix_node, *v, i);
+                    event_tracker.assign_split_label(shared_prefix_node, *v, (*wid, *wo == Direction::Left, *wl));
                 }
                 None => {
                     // if node coincides with shared prefix (but is not the dedicated shared prefix
@@ -523,24 +536,23 @@ fn collapse(
                         .neighbors(*u, Direction::Right)
                         .filter(|v| !del_subg.edge_deleted(&u, v))
                         .collect();
-                    let i = event_tracker.new_split_id();
-                    for w in outgoing_edges {
-                        if !graph.has_edge(shared_prefix_node, w) {
-                            graph.create_edge(Edge(shared_prefix_node, w));
+                    for x in outgoing_edges {
+                        if !graph.has_edge(shared_prefix_node, x) {
+                            graph.create_edge(Edge(shared_prefix_node, x));
                             log::debug!(
-                                "create edge {}{}{}{} with split-id {}",
+                                "create edge {}{}{}{} with split-id {:?}",
                                 if shared_prefix_node.is_reverse() {
                                     '<'
                                 } else {
                                     '>'
                                 },
                                 shared_prefix_node.unpack_number(),
-                                if w.is_reverse() { '<' } else { '>' },
-                                w.unpack_number(),
-                                i
+                                if x.is_reverse() { '<' } else { '>' },
+                                x.unpack_number(),
+                                (wid, wo, wl)
                             );
                         }
-                        event_tracker.assign_split_id(shared_prefix_node, w, i);
+                        event_tracker.assign_split_label(shared_prefix_node, x, (*wid, *wo == Direction::Left, *wl));
                     }
                 }
             }
@@ -550,8 +562,8 @@ fn collapse(
                 if u.is_reverse() { '<' } else { '>' },
                 u.unpack_number()
             );
-            del_subg.add(*u);
-        } 
+            del_subg.add_node(*u);
+        }
     }
 
     event_tracker.report(
@@ -999,6 +1011,70 @@ fn parse_and_transform_walks<W: io::Write, R: io::Read>(
     Ok(())
 }
 
+fn decollapse(
+    graph: &mut HashGraph,
+    path: &Path<usize, ()>,
+    transform: &mut FxHashMap<(usize, usize), Vec<(usize, Direction, usize)>>,
+    orig_node_lens: &FxHashMap<usize, usize>,
+    edge_labels: &FxHashMap<(Handle, Handle), FxHashSet<(usize, bool, usize)>>,
+) {
+    let visited: FxHashSet<usize> = FxHashSet::default();
+
+   
+    let mut parent_step: Option<(usize, Orientation)> = None;
+    let mut parent_handle: Option<Handle> = None;
+
+    for (vid, vo) in path.iter() {
+
+        // V Is Reversed
+        let vir = vo == Orientation::Backward;
+        // V Length
+        let vl = *orig_node_lens.get(&vid).unwrap();
+
+        let transformed_path = match transform.get(&(vid, vl)) {
+            Some(us) => if vir {
+                us.iter().rev().map(|(x, y, _)| { ( *x, *y == Direction::Right) })
+                    .collect::<Vec<(usize, bool)>>()
+            } else {
+                us.iter().map(|(x, y, _)| (*x, *y == Direction::Left)).collect::<Vec<(usize, bool)>>()
+            },
+            None => vec![(vid, vir)],
+        };
+        
+        for (uid, uir) in transformed_path {
+            if visited.contains(&uid) {
+                let u = Handle::pack(uid, uir);
+                let seq = graph.sequence_vec(u);
+                let dup = graph.append_handle(&seq[..]);
+                //
+                // de-collapse incoming edges
+                //
+                // XXX handle case where parent handle is None!
+                let e = canonize_edge(parent_handle.unwrap(), u);
+                let mut label : Option<(usize, bool, usize)> = None;
+                if edge_labels.contains_key(&e){
+                    // edge is labeled, i.e., when duplicated only edges of this label will be
+                    // recovered
+                    let labels = edge_labels.get(&e).unwrap();
+//                    label = match labels.len() {
+//                        1 => labels.iter().next(),
+//                        _ => labels.get(&(vid, vir, vl))
+//                    }.or(panic!("not able to handle this case yet"));
+                }
+                for w in graph.neighbors(u, Direction::Left) {
+                    let e = canonize_edge(u.flip(), w);
+                    // XXX until here
+//                    if edge_labels.get(&e).and_then(}
+                }
+                // de-collapse outgoing edges
+                for w in graph.neighbors(u, Direction::Right) {
+                    continue
+                }
+            }
+        }
+    }
+}
+
 fn main() -> Result<(), io::Error> {
     env_logger::init();
 
@@ -1048,6 +1124,16 @@ fn main() -> Result<(), io::Error> {
         check_transform(&old_graph, &graph, &transform);
         log::info!("all correct!");
     }
+
+    //    for path_str in params.no_collapse_path {
+    //        let path_id = match graph.get_path_id(path_str.as_bytes());
+    //        if path_id == None {
+    //            panic!("unknown path {}", path_str);
+    //        }
+    //        let path = graph.paths.get(path_id.unwrap()).unwrap();
+    //
+    //        for
+    //    }
 
     if !params.transformation_out.trim().is_empty() {
         log::info!("writing transformations to {}", params.transformation_out);
