@@ -1040,7 +1040,6 @@ fn main() -> Result<(), io::Error> {
     let mut graph = HashGraph::from_gfa(&gfa);
 
     log::debug!("handlegraph has {} edges", graph.edge_count());
-    graph.paths.clear();
 
     log::info!("storing length of original nodes for bookkeeping");
     let mut node_lens: FxHashMap<usize, usize> = FxHashMap::default();
@@ -1070,6 +1069,12 @@ fn main() -> Result<(), io::Error> {
             dont_collapse_handles.len()
         );
     }
+
+
+    //
+    // REMOVING PATHS FROM GRAPH -- they SUBSTANTIALLY slow down graph editing 
+    //
+    graph.paths.clear();
 
     log::info!("identifying path-preserving shared prefixes");
     writeln!(
