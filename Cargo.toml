@@ -1,6 +1,6 @@
 [package]
 name = "gfaffix"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["Daniel Doerr <daniel.doerr@hhu.de>"]
 edition = "2018"
 
