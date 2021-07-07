@@ -408,7 +408,7 @@ fn collapse(
     no_collapse: &mut FxHashSet<Handle>,
     del_subg: &mut DeletedSubGraph,
     event_tracker: &mut CollapseEventTracker,
-) -> Handle {
+) -> Option<Handle> {
     let prefix_len = shared_prefix.sequence.len();
 
     // Sort handles with shared prefix so that reversed ones come first! This is important for the
@@ -427,6 +427,12 @@ fn collapse(
     });
 
     shared_prefix_nodes = prevent_collapse(shared_prefix_nodes, no_collapse, graph, prefix_len);
+    //
+    // abort collapse if there's nothing to collapse
+    //
+    if shared_prefix_nodes.len() < 2 {
+        return None
+    }
 
     // update graph in two passes:
     //  1. split handles into shared prefix and distinct suffix and appoint dedicated shared
@@ -582,7 +588,7 @@ fn collapse(
         graph.node_len(shared_prefix_node),
         &splitted_node_pairs,
     );
-    shared_prefix_node
+    Some(shared_prefix_node)
 }
 
 fn get_shared_prefix(
@@ -635,7 +641,6 @@ fn find_and_collapse_path_preserving_shared_affixes<W: Write>(
                 let affixes =
                     enumerate_path_preserving_shared_affixes(graph, &del_subg, v).unwrap();
                 for affix in affixes.iter() {
-                    has_changed |= true;
                     // in each iteration, the set of deleted nodes can change and affect the
                     // subsequent iteration, so we need to check the status the node every time
                     if affix
@@ -660,10 +665,13 @@ fn find_and_collapse_path_preserving_shared_affixes<W: Write>(
                         {
                             event_tracker.overlapping_events += 1
                         }
-                        let shared_prefix_node =
+                        let shared_prefix_node_maybe =
                             collapse(graph, affix, no_collapse, &mut del_subg, &mut event_tracker);
-                        queue.push_back(shared_prefix_node);
-                        queue.push_back(shared_prefix_node.flip());
+                        if let Some(shared_prefix_node) = shared_prefix_node_maybe {
+                            queue.push_back(shared_prefix_node);
+                            queue.push_back(shared_prefix_node.flip());
+                            has_changed |= true;
+                        }
                     }
                 }
             }
