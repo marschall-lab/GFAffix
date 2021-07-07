@@ -18,6 +18,7 @@ use handlegraph::{
     handlegraph::*,
     hashgraph::HashGraph,
     mutablehandlegraph::{AdditiveHandleGraph, MutableHandles},
+    pathhandlegraph::GraphPathNames,
 };
 use quick_csv::Csv;
 use rustc_hash::FxHashMap;
@@ -57,6 +58,14 @@ pub struct Command {
         about = "Verifies that the transformed parts of the graphs spell out the identical sequence as in the original graph. Only for debugging purposes."
     )]
     pub check_transformation: bool,
+
+    #[clap(
+        short = 'x',
+        long = "dont_collapse",
+        about = "Do not collapse given set of paths",
+        default_value = " "
+    )]
+    pub no_collapse_path: Vec<String>,
 }
 
 // structure for storing reported subgraph
@@ -81,16 +90,16 @@ impl DeletedSubGraph {
     }
 
     fn edge_deleted(&self, u: &Handle, v: &Handle) -> bool {
-        let mut res : bool;
-        if u.is_reverse() { 
+        let mut res: bool;
+        if u.is_reverse() {
             res = self.nodes.contains(&u.flip());
         } else {
             res = self.nodes.contains(u);
         }
-        if v.is_reverse() { 
-             res |= self.nodes.contains(&v.flip())
-         } else { 
-             res |= self.nodes.contains(v) 
+        if v.is_reverse() {
+            res |= self.nodes.contains(&v.flip())
+        } else {
+            res |= self.nodes.contains(v)
         }
 
         res
@@ -345,9 +354,58 @@ fn enumerate_path_preserving_shared_affixes(
     Ok(res)
 }
 
+fn prevent_collapse(
+    shared_prefix_nodes: Vec<Handle>,
+    no_collapse: &FxHashSet<Handle>,
+    graph: &HashGraph,
+    prefix_len: usize,
+) -> Vec<Handle> {
+    // base case
+    if no_collapse.len() == 0 {
+        return shared_prefix_nodes;
+    }
+
+    let conflicting_nodes = shared_prefix_nodes
+        .iter()
+        .filter(|&x| no_collapse.contains(&(if x.is_reverse() { x.flip() } else { *x })))
+        .collect::<Vec<&Handle>>();
+
+    if conflicting_nodes.len() > 1 {
+        // determine which non-collapsing node to keep
+        let mut p = 0;
+        for (i, v) in conflicting_nodes.iter().enumerate() {
+            if graph.node_len(**v) == prefix_len {
+                p = i;
+            }
+        }
+        // dedicated node
+        let v = *conflicting_nodes[p];
+
+        log::debug!(
+            "nodes {} are in conflict with {}, therefore removing them from shared prefix list",
+            conflicting_nodes
+                .iter()
+                .filter(|x| ***x != v)
+                .map(|x| format!("{}", x.unpack_number()))
+                .collect::<Vec<String>>()
+                .join(","),
+            v.unpack_number()
+        );
+
+        // remove all others from shared_prefix_nodes
+        shared_prefix_nodes
+            .into_iter()
+            .filter(|x| *x != v)
+            .collect::<Vec<Handle>>()
+    } else {
+        shared_prefix_nodes
+    }
+}
+
 fn collapse(
     graph: &mut HashGraph,
     shared_prefix: &AffixSubgraph,
+    no_collapse: &mut FxHashSet<Handle>,
     del_subg: &mut DeletedSubGraph,
     event_tracker: &mut CollapseEventTracker,
 ) -> Handle {
@@ -367,6 +425,8 @@ fn collapse(
         (false, true) => Ordering::Greater,
         _ => Ordering::Equal,
     });
+
+    shared_prefix_nodes = prevent_collapse(shared_prefix_nodes, no_collapse, graph, prefix_len);
 
     // update graph in two passes:
     //  1. split handles into shared prefix and distinct suffix and appoint dedicated shared
@@ -392,10 +452,28 @@ fn collapse(
             // x corresponds to the shared prefix,
             let (x, u) = if v.is_reverse() {
                 // apparently, rs-handlegraph does not allow splitting nodes in reverse direction
-                let (u_rev, x_rev) = graph.split_handle(v.flip(), v_len - prefix_len);
+                let v_rev = v.flip();
+                let (u_rev, x_rev) = graph.split_handle(v_rev, v_len - prefix_len);
+                if no_collapse.contains(&v_rev) {
+                    log::debug!(
+                        "adding suffix {} of node {} to no-collapse set",
+                        x_rev.unpack_number(),
+                        v_rev.unpack_number()
+                    );
+                    no_collapse.insert(x_rev);
+                }
                 (x_rev.flip(), u_rev.flip())
             } else {
-                graph.split_handle(*v, prefix_len)
+                let (x, u) = graph.split_handle(*v, prefix_len);
+                if no_collapse.contains(&v) {
+                    log::debug!(
+                        "adding suffix {} of node {} to no-collapse set",
+                        u.unpack_number(),
+                        v.unpack_number()
+                    );
+                    no_collapse.insert(u);
+                }
+                (x, u)
             };
             splitted_node_pairs.push((
                 node_id,
@@ -404,7 +482,7 @@ fn collapse(
                 x,
                 Some((u, graph.node_len(u))),
             ));
-            // update dedicated shared prefix node if none has been assigned yet
+
             log::debug!(
                 "splitting node {}{} into prefix {}{} and suffix {}{}",
                 if v.is_reverse() { '<' } else { '>' },
@@ -533,6 +611,7 @@ fn get_shared_prefix(
 
 fn find_and_collapse_path_preserving_shared_affixes<W: Write>(
     graph: &mut HashGraph,
+    no_collapse: &mut FxHashSet<Handle>,
     out: &mut io::BufWriter<W>,
 ) -> (DeletedSubGraph, CollapseEventTracker) {
     let mut del_subg = DeletedSubGraph::new();
@@ -582,7 +661,7 @@ fn find_and_collapse_path_preserving_shared_affixes<W: Write>(
                             event_tracker.overlapping_events += 1
                         }
                         let shared_prefix_node =
-                            collapse(graph, affix, &mut del_subg, &mut event_tracker);
+                            collapse(graph, affix, no_collapse, &mut del_subg, &mut event_tracker);
                         queue.push_back(shared_prefix_node);
                         queue.push_back(shared_prefix_node.flip());
                     }
@@ -970,6 +1049,28 @@ fn main() -> Result<(), io::Error> {
         node_lens.insert(v.unpack_number() as usize, graph.node_len(v));
     }
 
+    let mut dont_collapse_handles: FxHashSet<Handle> = FxHashSet::default();
+    for path_str in params.no_collapse_path {
+        let path_id = graph.get_path_id(&path_str.as_bytes()[..]);
+        if path_id == None {
+            panic!("unknown path {}", path_str);
+        }
+        let path = graph.paths.get(&path_id.unwrap()).unwrap();
+        dont_collapse_handles.extend(path.nodes.iter().map(|&x| {
+            if x.is_reverse() {
+                x.flip()
+            } else {
+                x
+            }
+        }));
+
+        log::info!(
+            "flagging nodes of path {} as non-collapsing, total number is now at {}",
+            path_str,
+            dont_collapse_handles.len()
+        );
+    }
+
     log::info!("identifying path-preserving shared prefixes");
     writeln!(
         out,
@@ -983,8 +1084,11 @@ fn main() -> Result<(), io::Error> {
         .join("\t")
     )?;
 
-    let (del_subg, event_tracker) =
-        find_and_collapse_path_preserving_shared_affixes(&mut graph, &mut out);
+    let (del_subg, event_tracker) = find_and_collapse_path_preserving_shared_affixes(
+        &mut graph,
+        &mut dont_collapse_handles,
+        &mut out,
+    );
     let transform = event_tracker.get_expanded_transformation();
 
     if params.check_transformation {
@@ -1014,8 +1118,7 @@ fn main() -> Result<(), io::Error> {
             );
         }
         log::info!("transforming paths");
-        if let Err(e) = parse_and_transform_paths(&gfa, &node_lens, &transform, &mut graph_out)
-        {
+        if let Err(e) = parse_and_transform_paths(&gfa, &node_lens, &transform, &mut graph_out) {
             panic!(
                 "unable to write refined GFA path lines to {}: {}",
                 params.refined_graph_out.clone(),
@@ -1024,8 +1127,7 @@ fn main() -> Result<(), io::Error> {
         };
         log::info!("transforming walks");
         let data = io::BufReader::new(fs::File::open(&params.graph)?);
-        if let Err(e) = parse_and_transform_walks(data, &transform, &node_lens, &mut graph_out)
-        {
+        if let Err(e) = parse_and_transform_walks(data, &transform, &node_lens, &mut graph_out) {
             panic!(
                 "unable to parse or write refined GFA walk lines  to {}: {}",
                 params.refined_graph_out.clone(),
