@@ -30,16 +30,16 @@ git clone https://github.com/marschall-lab/GFAffix.git
 cargo build --manifest-path GFAffix/Cargo.toml --release
 ```
 
-### From release
+### From binary release (linux x86\_64)
 
 ```
 
-# install rs-handlegraph from repository
-git clone https://github.com/chfi/rs-handlegraph.git
+wget --no-check-certificate -c https://github.com/marschall-lab/GFAffix/releases/download/0.1.1/GFAffix-0.1.1_linux_x86_64.tar.gz 
+tar -xzvf GFAffix-0.1.1_linux_x86_64.tar.gz 
 
-wget --no-check-certificate -c https://github.com/marschall-lab/GFAffix/archive/refs/tags/0.1.tar.gz
-tar -xzvf 0.1.tar.gz
-cargo build --manifest-path GFAffix-0.1/Cargo.toml --release
+# you are ready to go! 
+./GFAffix-0.1.1/gfaffix
+
 
 ```
 
@@ -68,13 +68,15 @@ FLAGS:
     -V, --version                 Prints version information
 
 OPTIONS:
+    -x, --dont_collapse <no-collapse-path>...
+            Do not collapse given set of paths [default:  ]
+
     -o, --output_refined <refined-graph-out>
             write refined graph in GFA1 format to supplied file [default:  ]
 
     -t, --output_transformation <transformation-out>
             report original nodes and their corresponding paths in refined graph to supplied file
-            [default:  ]
-```
+            [default:  ]```
 
 ## Execution
 
