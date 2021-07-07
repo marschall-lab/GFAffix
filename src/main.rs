@@ -1051,11 +1051,11 @@ fn main() -> Result<(), io::Error> {
 
     let mut dont_collapse_handles: FxHashSet<Handle> = FxHashSet::default();
     for path_str in params.no_collapse_path {
-        let path_id = graph.get_path_id(&path_str.as_bytes()[..]);
-        if path_id == None {
+        if !graph.has_path(&path_str.as_bytes()[..]){
             panic!("unknown path {}", path_str);
         }
-        let path = graph.paths.get(&path_id.unwrap()).unwrap();
+        let path_id = graph.get_path_id(&path_str.as_bytes()[..]).unwrap();
+        let path = graph.get_path(&path_id).unwrap();
         dont_collapse_handles.extend(path.nodes.iter().map(|&x| {
             if x.is_reverse() {
                 x.flip()
