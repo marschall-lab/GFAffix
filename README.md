@@ -26,7 +26,7 @@ git clone https://github.com/chfi/rs-handlegraph.git
 cargo build --manifest-path rs-handlegraph/Cargo.toml --release
 
 # install GFAffix
-git clone https://github.com/danydoerr/GFAffix.git
+git clone https://github.com/marschall-lab/GFAffix.git
 cargo build --manifest-path GFAffix/Cargo.toml --release
 ```
 
@@ -37,7 +37,7 @@ cargo build --manifest-path GFAffix/Cargo.toml --release
 # install rs-handlegraph from repository
 git clone https://github.com/chfi/rs-handlegraph.git
 
-wget --no-check-certificate -c https://github.com/danydoerr/GFAffix/archive/refs/tags/0.1.tar.gz
+wget --no-check-certificate -c https://github.com/marschall-lab/GFAffix/archive/refs/tags/0.1.tar.gz
 tar -xzvf 0.1.tar.gz
 cargo build --manifest-path GFAffix-0.1/Cargo.toml --release
 
