@@ -352,7 +352,7 @@ impl CollapseEventTracker {
             count
                 .values()
                 .map(|&x| if x > 1 { 1 } else { 0 })
-                .sum::<u8>()
+                .sum::<usize>()
         );
 
         // multiplicate nodes that occur more than once
