@@ -347,6 +347,14 @@ impl CollapseEventTracker {
             }
         }
 
+        log::info!(
+            "reverting {} collapses",
+            count
+                .values()
+                .map(|&x| if x > 1 { 1 } else { 0 })
+                .sum::<u8>()
+        );
+
         // multiplicate nodes that occur more than once
         let mut copies: FxHashMap<(usize, usize), Vec<Handle>> = FxHashMap::default();
         for ((vid, vlen), occ) in count.iter_mut() {
