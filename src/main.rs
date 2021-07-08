@@ -348,7 +348,7 @@ impl CollapseEventTracker {
         }
 
         log::info!(
-            "reverting {} collapses in order to de-duplicate given set of paths",
+            "reverting {} collapses in order to de-duplicate nodes on given set of paths",
             count
                 .values()
                 .map(|&x| if x > 1 { 1 } else { 0 })
