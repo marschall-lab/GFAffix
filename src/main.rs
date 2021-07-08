@@ -326,8 +326,19 @@ impl CollapseEventTracker {
     }
 
     fn decollapse(&mut self, graph: &mut HashGraph, nodes: FxHashSet<(usize, usize)>) {
+        // first of all, remove unnecessary transformation rules
+        let keys = self
+            .transform
+            .keys()
+            .map(|(xid, xlen)| (xid.clone(), xlen.clone()))
+            .collect::<Vec<(usize, usize)>>();
+        for (vid, vlen) in keys {
+            let rule = self.transform.get(&(vid, vlen)).unwrap();
+            if rule.len() == 1 && rule[0] == (vid, Direction::Right, vlen) {
+                self.transform.remove(&(vid, vlen));
+            }
+        }
         let mut count: FxHashMap<(usize, usize), usize> = FxHashMap::default();
-
         for (vid, vlen) in nodes.iter() {
             let expansion = self.expand(*vid, Direction::Right, *vlen);
 
