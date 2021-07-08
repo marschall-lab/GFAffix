@@ -364,14 +364,31 @@ impl CollapseEventTracker {
                 // create copy u of node v
                 let v = Handle::pack(*vid, false);
                 let u = graph.append_handle(&graph.sequence_vec(v)[..]);
+                log::debug!(
+                    "creating duplicate {} of node {}",
+                    u.unpack_number(),
+                    v.unpack_number()
+                );
                 // copy incident edges of v onto u
                 for w in graph.neighbors(v, Direction::Left).collect::<Vec<Handle>>() {
-                    graph.create_edge(Edge(w.flip(), u));
+                    log::debug!(
+                        "creating duplicate edge <{}{}{}",
+                        u.unpack_number(),
+                        if w.is_reverse() { '<' } else { '>' },
+                        w.unpack_number()
+                    );
+                    graph.create_edge(Edge(u.flip(), w));
                 }
                 for w in graph
                     .neighbors(v, Direction::Right)
                     .collect::<Vec<Handle>>()
                 {
+                    log::debug!(
+                        "creating duplicate edge >{}{}{}",
+                        u.unpack_number(),
+                        if w.is_reverse() { '<' } else { '>' },
+                        w.unpack_number()
+                    );
                     graph.create_edge(Edge(u, w));
                 }
                 copies.get_mut(&(*vid, *vlen)).unwrap().push(u);
