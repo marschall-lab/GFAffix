@@ -377,7 +377,7 @@ impl CollapseEventTracker {
                         if w.is_reverse() { '<' } else { '>' },
                         w.unpack_number()
                     );
-                    graph.create_edge(Edge(u.flip(), w));
+                    graph.create_edge(Edge(u.flip(), w.flip()));
                 }
                 for w in graph
                     .neighbors(v, Direction::Right)
