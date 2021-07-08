@@ -396,7 +396,7 @@ fn prevent_collapse(
         // remove all others from shared_prefix_nodes
         shared_prefix_nodes
             .into_iter()
-            .filter(|x| *x == v || !conflicting_nodes.contains(&x))
+            .filter(|x| *x == v || !conflicting_nodes.contains(x))
             .collect::<Vec<Handle>>()
     } else {
         shared_prefix_nodes
