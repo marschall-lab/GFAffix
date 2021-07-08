@@ -10,7 +10,7 @@ use std::str::{self, FromStr};
 /* crate use */
 use clap::Clap;
 use gfa::{
-    gfa::{orientation::Orientation, Path, GFA},
+    gfa::{orientation::Orientation, GFA},
     parser::GFAParser,
 };
 use handlegraph::{
@@ -18,6 +18,7 @@ use handlegraph::{
     handlegraph::*,
     hashgraph::HashGraph,
     mutablehandlegraph::{AdditiveHandleGraph, MutableHandles},
+    pathhandlegraph::GraphPathNames,
 };
 use quick_csv::Csv;
 use rustc_hash::FxHashMap;
@@ -77,11 +78,10 @@ pub struct AffixSubgraph {
 #[derive(Clone, Debug)]
 pub struct DeletedSubGraph {
     pub nodes: FxHashSet<Handle>,
-    pub edges: FxHashSet<(Handle, Handle)>,
 }
 
 impl DeletedSubGraph {
-    fn add_node(&mut self, v: Handle) -> bool {
+    fn add(&mut self, v: Handle) -> bool {
         if v.is_reverse() {
             self.nodes.insert(v.flip())
         } else {
@@ -89,10 +89,6 @@ impl DeletedSubGraph {
         }
     }
 
-
-    fn add_edge(&mut self, u: Handle, v: Handle) -> bool {
-        self.edges.insert(canonize_edge(u, v))
-    }
 
     fn edge_deleted(&self, u: &Handle, v: &Handle) -> bool {
         let mut res: bool;
@@ -106,8 +102,6 @@ impl DeletedSubGraph {
         } else {
             res |= self.nodes.contains(v)
         }
-        res |= self.edges.contains(&canonize_edge(*u, *v));
-
         res
     }
 
@@ -122,7 +116,6 @@ impl DeletedSubGraph {
     fn new() -> Self {
         DeletedSubGraph {
             nodes: FxHashSet::default(),
-            edges: FxHashSet::default(),
         }
     }
 }
@@ -137,7 +130,6 @@ pub struct CollapseEventTracker {
     pub events: usize,
 
     modified_nodes: FxHashSet<(usize, usize)>,
-    edge_labels: FxHashMap<(Handle, Handle), FxHashSet<(usize, bool, usize)>>,
 }
 
 impl CollapseEventTracker {
@@ -215,42 +207,6 @@ impl CollapseEventTracker {
         }
     }
 
-    fn assign_split_label(&mut self, u: Handle, v: Handle, label: (usize, bool, usize)) {
-        let e = canonize_edge(u, v);
-        self.edge_labels.entry(e).or_insert(FxHashSet::default()).insert(label);
-    }
-
-    fn split_handle(
-        &mut self,
-        graph: &mut HashGraph,
-        v: Handle,
-        position: usize,
-    ) -> (Handle, Handle) {
-        let v_len = graph.node_len(v);
-        if v.is_reverse() {
-            // apparently, rs-handlegraph does not allow splitting nodes in reverse direction
-            let (u_rev, x_rev) = graph.split_handle(v.flip(), v_len - position);
-            self.update_outgoing_edge_annotation(graph, v, x_rev);
-
-            (x_rev.flip(), u_rev.flip())
-        } else {
-            let (x, u) = graph.split_handle(v, position);
-            self.update_outgoing_edge_annotation(graph, v, u);
-
-            (x, u)
-        }
-    }
-
-    fn update_outgoing_edge_annotation(&mut self, graph: &HashGraph, old: Handle, new: Handle) {
-        for w in graph.neighbors(new, Direction::Right) {
-            let e = canonize_edge(old, w);
-            if let Some(val) = self.edge_labels.remove(&e) {
-                let f = canonize_edge(new, w);
-                self.edge_labels.insert(f, val);
-            }
-        }
-    }
-
     fn expand(
         &self,
         node_id: usize,
@@ -283,6 +239,47 @@ impl CollapseEventTracker {
 
         res
     }
+
+    fn deduplicate_transform(
+        &mut self,
+        node_id: usize,
+        node_len: usize,
+        copies : &mut FxHashMap<(usize, usize), Vec<Handle>>) {
+
+        let mut queue = vec![(node_id, node_len)];
+
+        while queue.len() > 0 {
+            let (vid, vlen) = queue.pop().unwrap();
+            if self.transform.contains_key(&(vid, vlen)) {
+                let mut copy_of_vid = vid.clone();
+                for (rid, _, rlen) in self.transform.get_mut(&(vid, vlen)).unwrap() {
+                    // if identical node appears in its expansion sequence, don't expand...
+                    if (*rid, *rlen) != (vid, vlen) {
+                        queue.push((*rid, *rlen));
+                    }
+
+                    let key = (rid.clone(), rlen.clone());
+                    if copies.contains_key(&key) {
+                        // replace by a copy 
+                        let c = copies.get_mut(&key).unwrap().pop().unwrap();
+                        *rid = c.unpack_number() as usize;
+
+                        // if copy is also key of transform table, then record new ID
+                        if key == (vid, vlen) {
+                            copy_of_vid = rid.clone()
+                        }
+                    }
+                }
+
+                // if copy is also key of transform table, then update key
+                if copies.contains_key(&(vid, vlen)) && copy_of_vid != vid{
+                    let val = self.transform.remove(&(vid, vlen)).unwrap();
+                    self.transform.insert((copy_of_vid, vlen.clone()), val);
+                }
+            }
+        }
+    }
+
 
     fn get_expanded_transformation(
         &self,
@@ -326,10 +323,54 @@ impl CollapseEventTracker {
         res
     }
 
+    fn decollapse(&mut self, graph: &mut HashGraph, nodes: FxHashSet<(usize, usize)>) {
+        let mut count : FxHashMap<(usize, usize), usize> = FxHashMap::default();
+
+        for (vid, vlen) in nodes.iter() {
+            let expansion = self.expand(*vid, Direction::Right, *vlen);
+            
+            for (uid, _, ulen) in expansion.iter() {
+                *count.entry((*uid, *ulen)).or_insert(0) += 1;
+            }
+        }
+        
+        // multiplicate nodes that occur more than once
+        let mut copies : FxHashMap<(usize, usize), Vec<Handle>> = FxHashMap::default();
+        for ((vid, vlen), occ) in count.iter_mut() {
+
+            // if a duplicated node is hit, create and record as many copies as needed to
+            // de-duplicate it!
+            if *occ > 1 {
+                // yes, the duplicated node is a valid copy of its own!
+                copies.entry((*vid, *vlen)).or_insert(Vec::new()).push(Handle::pack(*vid, false));
+            }
+            // make some more copies
+            while *occ > 1 {
+                // create copy u of node v
+                let v = Handle::pack(*vid, false);
+                let u = graph.append_handle(&graph.sequence_vec(v)[..]);
+                // copy incident edges of v onto u
+                for w in graph.neighbors(v, Direction::Left).collect::<Vec<Handle>>() {
+                    graph.create_edge(Edge(w.flip(), u));
+                }
+                for w in graph.neighbors(v, Direction::Right).collect::<Vec<Handle>>() {
+                    graph.create_edge(Edge(u, w));
+                }
+                copies.get_mut(&(*vid, *vlen)).unwrap().push(u);
+                *occ -= 1
+            }
+        }
+
+        // update transformation table
+        for (vid, vlen) in nodes.iter() {
+            self.deduplicate_transform(*vid, *vlen, &mut copies);
+        }
+        
+    }
+
     fn new() -> Self {
         CollapseEventTracker {
             transform: FxHashMap::default(),
-            edge_labels: FxHashMap::default(),
             overlapping_events: 0,
             bubbles: 0,
             events: 0,
@@ -337,10 +378,6 @@ impl CollapseEventTracker {
         }
     }
 
-}
-
-fn canonize_edge(u: Handle, v: Handle) -> (Handle, Handle) {
-    std::cmp::min((u, v), (v.flip(), u.flip()))
 }
 
 fn enumerate_path_preserving_shared_affixes(
@@ -446,7 +483,7 @@ fn collapse(
             Direction::Right
         };
         if v_len > prefix_len {
-            let (x, u) = event_tracker.split_handle(graph, *v, prefix_len);
+            let (x, u) = graph.split_handle(*v, prefix_len);
             splitted_node_pairs.push((
                 node_id,
                 node_orient,
@@ -493,18 +530,8 @@ fn collapse(
         shared_prefix_node.unpack_number()
     );
 
-    // before re-wiring edes to the shared prefix node, let's first assign a split label to its
-    // existing outgoing edges
-    let shared_split_label = (
-        shared_prefix_split.0,
-        shared_prefix_split.1 == Direction::Left,
-        shared_prefix_split.2,
-    );
-    for v in graph.neighbors(shared_prefix_node, Direction::Right) {
-        event_tracker.assign_split_label(shared_prefix_node, v, shared_split_label);
-    }
 
-    for (wid, wo, wl, u, maybe_v) in splitted_node_pairs.iter() {
+    for (_, _, _, u, maybe_v) in splitted_node_pairs.iter() {
         if *u != shared_prefix_node {
             // rewrire outgoing edges
             match maybe_v {
@@ -513,7 +540,7 @@ fn collapse(
                     if !graph.has_edge(shared_prefix_node, *v) {
                         graph.create_edge(Edge(shared_prefix_node, *v));
                         log::debug!(
-                            "create edge {}{}{}{} with split-label {:?}",
+                            "create edge {}{}{}{}",
                             if shared_prefix_node.is_reverse() {
                                 '<'
                             } else {
@@ -522,11 +549,8 @@ fn collapse(
                             shared_prefix_node.unpack_number(),
                             if v.is_reverse() { '<' } else { '>' },
                             v.unpack_number(),
-                            (wid, wo, wl)
                         );
                     }
-                    // split id of the re-wired edge
-                    event_tracker.assign_split_label(shared_prefix_node, *v, (*wid, *wo == Direction::Left, *wl));
                 }
                 None => {
                     // if node coincides with shared prefix (but is not the dedicated shared prefix
@@ -540,7 +564,7 @@ fn collapse(
                         if !graph.has_edge(shared_prefix_node, x) {
                             graph.create_edge(Edge(shared_prefix_node, x));
                             log::debug!(
-                                "create edge {}{}{}{} with split-id {:?}",
+                                "create edge {}{}{}{}",
                                 if shared_prefix_node.is_reverse() {
                                     '<'
                                 } else {
@@ -549,10 +573,8 @@ fn collapse(
                                 shared_prefix_node.unpack_number(),
                                 if x.is_reverse() { '<' } else { '>' },
                                 x.unpack_number(),
-                                (wid, wo, wl)
                             );
                         }
-                        event_tracker.assign_split_label(shared_prefix_node, x, (*wid, *wo == Direction::Left, *wl));
                     }
                 }
             }
@@ -562,7 +584,7 @@ fn collapse(
                 if u.is_reverse() { '<' } else { '>' },
                 u.unpack_number()
             );
-            del_subg.add_node(*u);
+            del_subg.add(*u);
         }
     }
 
@@ -1011,69 +1033,6 @@ fn parse_and_transform_walks<W: io::Write, R: io::Read>(
     Ok(())
 }
 
-fn decollapse(
-    graph: &mut HashGraph,
-    path: &Path<usize, ()>,
-    transform: &mut FxHashMap<(usize, usize), Vec<(usize, Direction, usize)>>,
-    orig_node_lens: &FxHashMap<usize, usize>,
-    edge_labels: &FxHashMap<(Handle, Handle), FxHashSet<(usize, bool, usize)>>,
-) {
-    let visited: FxHashSet<usize> = FxHashSet::default();
-
-   
-    let mut parent_step: Option<(usize, Orientation)> = None;
-    let mut parent_handle: Option<Handle> = None;
-
-    for (vid, vo) in path.iter() {
-
-        // V Is Reversed
-        let vir = vo == Orientation::Backward;
-        // V Length
-        let vl = *orig_node_lens.get(&vid).unwrap();
-
-        let transformed_path = match transform.get(&(vid, vl)) {
-            Some(us) => if vir {
-                us.iter().rev().map(|(x, y, _)| { ( *x, *y == Direction::Right) })
-                    .collect::<Vec<(usize, bool)>>()
-            } else {
-                us.iter().map(|(x, y, _)| (*x, *y == Direction::Left)).collect::<Vec<(usize, bool)>>()
-            },
-            None => vec![(vid, vir)],
-        };
-        
-        for (uid, uir) in transformed_path {
-            if visited.contains(&uid) {
-                let u = Handle::pack(uid, uir);
-                let seq = graph.sequence_vec(u);
-                let dup = graph.append_handle(&seq[..]);
-                //
-                // de-collapse incoming edges
-                //
-                // XXX handle case where parent handle is None!
-                let e = canonize_edge(parent_handle.unwrap(), u);
-                let mut label : Option<(usize, bool, usize)> = None;
-                if edge_labels.contains_key(&e){
-                    // edge is labeled, i.e., when duplicated only edges of this label will be
-                    // recovered
-                    let labels = edge_labels.get(&e).unwrap();
-//                    label = match labels.len() {
-//                        1 => labels.iter().next(),
-//                        _ => labels.get(&(vid, vir, vl))
-//                    }.or(panic!("not able to handle this case yet"));
-                }
-                for w in graph.neighbors(u, Direction::Left) {
-                    let e = canonize_edge(u.flip(), w);
-                    // XXX until here
-//                    if edge_labels.get(&e).and_then(}
-                }
-                // de-collapse outgoing edges
-                for w in graph.neighbors(u, Direction::Right) {
-                    continue
-                }
-            }
-        }
-    }
-}
 
 fn main() -> Result<(), io::Error> {
     env_logger::init();
@@ -1091,8 +1050,7 @@ fn main() -> Result<(), io::Error> {
     log::info!("constructing handle graph");
     let mut graph = HashGraph::from_gfa(&gfa);
 
-    log::debug!("handlegraph has {} edges", graph.edge_count());
-    graph.paths.clear();
+    log::info!("handlegraph has {} nodes and {} edges", graph.node_count(), graph.edge_count());
 
     log::info!("storing length of original nodes for bookkeeping");
     let mut node_lens: FxHashMap<usize, usize> = FxHashMap::default();
@@ -1100,6 +1058,31 @@ fn main() -> Result<(), io::Error> {
     for v in graph.handles() {
         node_lens.insert(v.unpack_number() as usize, graph.node_len(v));
     }
+
+    let mut dont_collapse_nodes: FxHashSet<(usize, usize)> = FxHashSet::default();
+    for path_str in params.no_collapse_path {
+        if !graph.has_path(&path_str.as_bytes()[..]){
+            panic!("unknown path {}", path_str);
+        }
+        let path_id = graph.get_path_id(&path_str.as_bytes()[..]).unwrap();
+        let path = graph.get_path(&path_id).unwrap();
+        dont_collapse_nodes.extend(path.nodes.iter().map(|&x| {
+            let xid = x.unpack_number() as usize;
+            (xid, *node_lens.get(&xid).unwrap())
+             }));
+
+        log::info!(
+            "flagging nodes of path {} as non-collapsing, total number is now at {}",
+            path_str,
+            dont_collapse_nodes.len()
+        );
+    }
+
+    //
+    // REMOVING PATHS FROM GRAPH -- they SUBSTANTIALLY slow down graph editing
+    //
+    graph.paths.clear();
+
 
     log::info!("identifying path-preserving shared prefixes");
     writeln!(
@@ -1114,8 +1097,15 @@ fn main() -> Result<(), io::Error> {
         .join("\t")
     )?;
 
-    let (del_subg, event_tracker) =
+    let (del_subg, mut event_tracker) =
         find_and_collapse_path_preserving_shared_affixes(&mut graph, &mut out);
+
+    if dont_collapse_nodes.len() > 0 {
+        log::info!("de-collapse no-collapse handles and update transformation table");
+        event_tracker.decollapse(&mut graph, dont_collapse_nodes);
+    }
+
+    log::info!("expand transformation table");
     let transform = event_tracker.get_expanded_transformation();
 
     if params.check_transformation {
@@ -1124,16 +1114,6 @@ fn main() -> Result<(), io::Error> {
         check_transform(&old_graph, &graph, &transform);
         log::info!("all correct!");
     }
-
-    //    for path_str in params.no_collapse_path {
-    //        let path_id = match graph.get_path_id(path_str.as_bytes());
-    //        if path_id == None {
-    //            panic!("unknown path {}", path_str);
-    //        }
-    //        let path = graph.paths.get(path_id.unwrap()).unwrap();
-    //
-    //        for
-    //    }
 
     if !params.transformation_out.trim().is_empty() {
         log::info!("writing transformations to {}", params.transformation_out);
