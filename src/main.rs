@@ -483,7 +483,14 @@ fn collapse(
             Direction::Right
         };
         if v_len > prefix_len {
-            let (x, u) = graph.split_handle(*v, prefix_len);
+            // x corresponds to the shared prefix,
+            let (x, u) = if v.is_reverse() {
+                // apparently, rs-handlegraph does not allow splitting nodes in reverse direction
+                let (u_rev, x_rev) = graph.split_handle(v.flip(), v_len - prefix_len);
+                (x_rev.flip(), u_rev.flip())
+            } else {
+                graph.split_handle(*v, prefix_len)
+            };
             splitted_node_pairs.push((
                 node_id,
                 node_orient,
