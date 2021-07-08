@@ -253,11 +253,6 @@ impl CollapseEventTracker {
             if self.transform.contains_key(&(vid, vlen)) {
                 let mut copy_of_vid = vid.clone();
                 for (rid, _, rlen) in self.transform.get_mut(&(vid, vlen)).unwrap() {
-                    // if identical node appears in its expansion sequence, don't expand...
-                    if (*rid, *rlen) != (vid, vlen) {
-                        queue.push((*rid, *rlen));
-                    }
-
                     let key = (rid.clone(), rlen.clone());
                     if copies.contains_key(&key) {
                         // replace by a copy 
@@ -269,6 +264,11 @@ impl CollapseEventTracker {
                             copy_of_vid = rid.clone()
                         }
                     }
+                    // if identical node appears in its expansion sequence, don't expand...
+                    if (*rid, *rlen) != (copy_of_vid, vlen) {
+                        queue.push((*rid, *rlen));
+                    }
+
                 }
 
                 // if copy is also key of transform table, then update key
