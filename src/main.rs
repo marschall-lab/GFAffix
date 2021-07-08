@@ -89,7 +89,6 @@ impl DeletedSubGraph {
         }
     }
 
-
     fn edge_deleted(&self, u: &Handle, v: &Handle) -> bool {
         let mut res: bool;
         if u.is_reverse() {
@@ -244,8 +243,8 @@ impl CollapseEventTracker {
         &mut self,
         node_id: usize,
         node_len: usize,
-        copies : &mut FxHashMap<(usize, usize), Vec<Handle>>) {
-
+        copies: &mut FxHashMap<(usize, usize), Vec<Handle>>,
+    ) {
         let mut queue = vec![(node_id, node_len)];
 
         while queue.len() > 0 {
@@ -255,9 +254,14 @@ impl CollapseEventTracker {
                 for (rid, _, rlen) in self.transform.get_mut(&(vid, vlen)).unwrap() {
                     let key = (rid.clone(), rlen.clone());
                     if copies.contains_key(&key) {
-                        // replace by a copy 
-                        let c = copies.get_mut(&key).unwrap().pop().unwrap();
-                        *rid = c.unpack_number() as usize;
+                        // replace by a copy
+                        let c = copies.get_mut(&key).unwrap().pop();
+                        if c == None {
+                            panic!("not enough copies available for node {}:{} to deduplicate transformation rule of {}:{}", key.0, key.1, vid, vlen);
+                        }
+                        let rid_new = c.unwrap().unpack_number() as usize;
+                        log::debug!("replace {}:{} by {}:{} in de-duplication of transformation rule of {}:{}", rid, rlen, rid_new, rlen, vid, vlen);
+                        *rid = rid_new;
 
                         // if copy is also key of transform table, then record new ID
                         if key == (vid, vlen) {
@@ -268,18 +272,16 @@ impl CollapseEventTracker {
                     if (*rid, *rlen) != (copy_of_vid, vlen) {
                         queue.push((*rid, *rlen));
                     }
-
                 }
 
                 // if copy is also key of transform table, then update key
-                if copies.contains_key(&(vid, vlen)) && copy_of_vid != vid{
+                if copies.contains_key(&(vid, vlen)) && copy_of_vid != vid {
                     let val = self.transform.remove(&(vid, vlen)).unwrap();
                     self.transform.insert((copy_of_vid, vlen.clone()), val);
                 }
             }
         }
     }
-
 
     fn get_expanded_transformation(
         &self,
@@ -324,25 +326,27 @@ impl CollapseEventTracker {
     }
 
     fn decollapse(&mut self, graph: &mut HashGraph, nodes: FxHashSet<(usize, usize)>) {
-        let mut count : FxHashMap<(usize, usize), usize> = FxHashMap::default();
+        let mut count: FxHashMap<(usize, usize), usize> = FxHashMap::default();
 
         for (vid, vlen) in nodes.iter() {
             let expansion = self.expand(*vid, Direction::Right, *vlen);
-            
+
             for (uid, _, ulen) in expansion.iter() {
                 *count.entry((*uid, *ulen)).or_insert(0) += 1;
             }
         }
-        
-        // multiplicate nodes that occur more than once
-        let mut copies : FxHashMap<(usize, usize), Vec<Handle>> = FxHashMap::default();
-        for ((vid, vlen), occ) in count.iter_mut() {
 
+        // multiplicate nodes that occur more than once
+        let mut copies: FxHashMap<(usize, usize), Vec<Handle>> = FxHashMap::default();
+        for ((vid, vlen), occ) in count.iter_mut() {
             // if a duplicated node is hit, create and record as many copies as needed to
             // de-duplicate it!
             if *occ > 1 {
                 // yes, the duplicated node is a valid copy of its own!
-                copies.entry((*vid, *vlen)).or_insert(Vec::new()).push(Handle::pack(*vid, false));
+                copies
+                    .entry((*vid, *vlen))
+                    .or_insert(Vec::new())
+                    .push(Handle::pack(*vid, false));
             }
             // make some more copies
             while *occ > 1 {
@@ -353,7 +357,10 @@ impl CollapseEventTracker {
                 for w in graph.neighbors(v, Direction::Left).collect::<Vec<Handle>>() {
                     graph.create_edge(Edge(w.flip(), u));
                 }
-                for w in graph.neighbors(v, Direction::Right).collect::<Vec<Handle>>() {
+                for w in graph
+                    .neighbors(v, Direction::Right)
+                    .collect::<Vec<Handle>>()
+                {
                     graph.create_edge(Edge(u, w));
                 }
                 copies.get_mut(&(*vid, *vlen)).unwrap().push(u);
@@ -365,7 +372,6 @@ impl CollapseEventTracker {
         for (vid, vlen) in nodes.iter() {
             self.deduplicate_transform(*vid, *vlen, &mut copies);
         }
-        
     }
 
     fn new() -> Self {
@@ -377,7 +383,6 @@ impl CollapseEventTracker {
             modified_nodes: FxHashSet::default(),
         }
     }
-
 }
 
 fn enumerate_path_preserving_shared_affixes(
@@ -536,7 +541,6 @@ fn collapse(
         },
         shared_prefix_node.unpack_number()
     );
-
 
     for (_, _, _, u, maybe_v) in splitted_node_pairs.iter() {
         if *u != shared_prefix_node {
@@ -1040,7 +1044,6 @@ fn parse_and_transform_walks<W: io::Write, R: io::Read>(
     Ok(())
 }
 
-
 fn main() -> Result<(), io::Error> {
     env_logger::init();
 
@@ -1057,7 +1060,11 @@ fn main() -> Result<(), io::Error> {
     log::info!("constructing handle graph");
     let mut graph = HashGraph::from_gfa(&gfa);
 
-    log::info!("handlegraph has {} nodes and {} edges", graph.node_count(), graph.edge_count());
+    log::info!(
+        "handlegraph has {} nodes and {} edges",
+        graph.node_count(),
+        graph.edge_count()
+    );
 
     log::info!("storing length of original nodes for bookkeeping");
     let mut node_lens: FxHashMap<usize, usize> = FxHashMap::default();
@@ -1068,7 +1075,7 @@ fn main() -> Result<(), io::Error> {
 
     let mut dont_collapse_nodes: FxHashSet<(usize, usize)> = FxHashSet::default();
     for path_str in params.no_collapse_path {
-        if !graph.has_path(&path_str.as_bytes()[..]){
+        if !graph.has_path(&path_str.as_bytes()[..]) {
             panic!("unknown path {}", path_str);
         }
         let path_id = graph.get_path_id(&path_str.as_bytes()[..]).unwrap();
@@ -1076,7 +1083,7 @@ fn main() -> Result<(), io::Error> {
         dont_collapse_nodes.extend(path.nodes.iter().map(|&x| {
             let xid = x.unpack_number() as usize;
             (xid, *node_lens.get(&xid).unwrap())
-             }));
+        }));
 
         log::info!(
             "flagging nodes of path {} as non-collapsing, total number is now at {}",
@@ -1089,7 +1096,6 @@ fn main() -> Result<(), io::Error> {
     // REMOVING PATHS FROM GRAPH -- they SUBSTANTIALLY slow down graph editing
     //
     graph.paths.clear();
-
 
     log::info!("identifying path-preserving shared prefixes");
     writeln!(
