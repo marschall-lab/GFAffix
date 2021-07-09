@@ -34,11 +34,11 @@ cargo build --manifest-path GFAffix/Cargo.toml --release
 
 ```
 
-wget --no-check-certificate -c https://github.com/marschall-lab/GFAffix/releases/download/0.1.1/GFAffix-0.1.1_linux_x86_64.tar.gz 
-tar -xzvf GFAffix-0.1.1_linux_x86_64.tar.gz 
+wget --no-check-certificate -c https://github.com/marschall-lab/GFAffix/releases/download/0.1.2/GFAffix-0.1.2_linux_x86_64.tar.gz 
+tar -xzvf GFAffix-0.1.2_linux_x86_64.tar.gz 
 
 # you are ready to go! 
-./GFAffix-0.1.1/gfaffix
+./GFAffix-0.1.2/gfaffix
 
 
 ```
@@ -47,7 +47,7 @@ tar -xzvf GFAffix-0.1.1_linux_x86_64.tar.gz
 
 ```
 $ gfaffix --help
-gfaffix 0.1
+gfaffix 0.1.2
 Daniel Doerr <daniel.doerr@hhu.de>
 Discover path-preserving shared prefixes in multifurcations of a given graph.
 
@@ -69,14 +69,15 @@ FLAGS:
 
 OPTIONS:
     -x, --dont_collapse <no-collapse-path>...
-            Do not collapse given set of paths [default:  ]
+            Do not collapse nodes on a given set of paths [default:  ]
 
     -o, --output_refined <refined-graph-out>
             write refined graph in GFA1 format to supplied file [default:  ]
 
     -t, --output_transformation <transformation-out>
             report original nodes and their corresponding paths in refined graph to supplied file
-            [default:  ]```
+            [default:  ]
+```
 
 ## Execution
 
