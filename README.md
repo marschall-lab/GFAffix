@@ -1,5 +1,7 @@
 # GFAffix
 
+GFAffix identifies walk-preserving shared affixes in variation graphs and collapses them into a non-redundant graph structure.
+
 # Dependencies
 
 `GFAffix` is written in RUST and requires a working RUST build system for
@@ -50,7 +52,7 @@ tar -xzvf GFAffix-0.1.2_linux_x86_64.tar.gz
 $ gfaffix --help
 gfaffix 0.1.2
 Daniel Doerr <daniel.doerr@hhu.de>
-Discover path-preserving shared prefixes in multifurcations of a given graph.
+Discover walk-preserving shared prefixes in multifurcations of a given graph.
 
     - Do you want log output? Call program with 'RUST_LOG=info gfaffix ...'
     - Log output not informative enough? Try 'RUST_LOG=debug gfaffix ...'
@@ -70,13 +72,14 @@ FLAGS:
 
 OPTIONS:
     -x, --dont_collapse <no-collapse-path>
-            Do not collapse nodes on a given paths that match given regular expression [default:  ]
+            Do not collapse nodes on a given paths ("P" lines) that match given regular expression
+            [default:  ]
 
     -o, --output_refined <refined-graph-out>
             write refined graph in GFA1 format to supplied file [default:  ]
 
     -t, --output_transformation <transformation-out>
-            report original nodes and their corresponding paths in refined graph to supplied file
+            report original nodes and their corresponding walks in refined graph to supplied file
             [default:  ]
 ```
 
