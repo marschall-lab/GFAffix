@@ -1130,7 +1130,7 @@ fn main() -> Result<(), io::Error> {
 
     let mut dont_collapse_nodes: FxHashSet<(usize, usize)> = FxHashSet::default();
     for path_str in params.no_collapse_path {
-        if !path_str.is_empty() && !graph.has_path(&path_str.as_bytes()[..]) {
+        if !path_str.trim().is_empty() && !graph.has_path(&path_str.as_bytes()[..]) {
             panic!("unknown path {}", path_str);
         }
         let path_id = graph.get_path_id(&path_str.as_bytes()[..]).unwrap();
