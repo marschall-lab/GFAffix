@@ -449,7 +449,7 @@ fn enumerate_path_preserving_shared_affixes(
     }
 
     for ((c, parents), children) in branch.iter() {
-        if children.len() > 1 && (c == &b'A' || c == &b'C' || c == &b'G' || c == &b'T') {
+        if children.len() > 1 && (c == &b'A' || c == &b'C' || c == &b'G' || c == &b'T' || c == &b'N') {
             let prefix = get_shared_prefix(children, graph)?;
             log::debug!(
                 "identified shared prefix {} between nodes {} originating from parent(s) {}",
@@ -682,6 +682,7 @@ fn get_shared_prefix(
                     (b'T', b't') => false,
                     (b't', b'T') => false,
                     (b't', b't') => false,
+                    (b'N', b'N') => false,
                     _ => true,
                 }
         }) {
