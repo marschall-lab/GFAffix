@@ -448,8 +448,14 @@ fn enumerate_path_preserving_shared_affixes(
 
     for ((_, parents), children) in branch.iter() {
         if children.len() > 1 {
+            let prefix = get_shared_prefix(children, graph)?;
             log::debug!(
-                "identified shared prefix between nodes {} originating from parent(s) {}",
+                "identified shared prefix {} between nodes {} originating from parent(s) {}",
+                if prefix.len() > 10 {
+                    prefix[..10].to_string() + "..."
+                } else {
+                    prefix.clone()
+                },
                 children
                     .iter()
                     .map(|v| format!(
@@ -470,7 +476,7 @@ fn enumerate_path_preserving_shared_affixes(
                     .join(",")
             );
             res.push(AffixSubgraph {
-                sequence: get_shared_prefix(children, graph)?,
+                sequence: prefix,
                 parents: parents.clone(),
                 shared_prefix_nodes: children.clone(),
             });
