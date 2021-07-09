@@ -14,6 +14,7 @@ It makes use of the following crates:
 * handlegraph
 * log
 * quick-csv
+* regex
 * rustc-hash
 
 ## Installation
@@ -68,8 +69,8 @@ FLAGS:
     -V, --version                 Prints version information
 
 OPTIONS:
-    -x, --dont_collapse <no-collapse-path>...
-            Do not collapse nodes on a given set of paths [default:  ]
+    -x, --dont_collapse <no-collapse-path>
+            Do not collapse nodes on a given paths that match given regular expression [default:  ]
 
     -o, --output_refined <refined-graph-out>
             write refined graph in GFA1 format to supplied file [default:  ]
