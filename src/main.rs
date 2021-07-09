@@ -26,7 +26,7 @@ use rustc_hash::FxHashSet;
 
 #[derive(clap::Clap, Debug)]
 #[clap(
-    version = "0.1",
+    version = "0.1.2",
     author = "Daniel Doerr <daniel.doerr@hhu.de>",
     about = "Discover path-preserving shared prefixes in multifurcations of a given graph.\n
     - Do you want log output? Call program with 'RUST_LOG=info gfaffix ...'
