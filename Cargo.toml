@@ -9,6 +9,7 @@ edition = "2018"
 [dependencies]
 clap        = "3.0.0-beta.2"
 rustc-hash = "1"
+regex = "1"
 # rs-handlegraph has a critical bug that causes some edges to be ignored. This
 # is fixed in the repsitory, but not yet in a release. Until that happens, use
 # the version from the repository (https://github.com/chfi/rs-handlegraph.git)
