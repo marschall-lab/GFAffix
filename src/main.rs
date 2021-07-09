@@ -21,8 +21,8 @@ use handlegraph::{
     pathhandlegraph::GraphPathNames,
 };
 use quick_csv::Csv;
-use rustc_hash::FxHashMap;
-use rustc_hash::FxHashSet;
+use regex::Regex;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 #[derive(clap::Clap, Debug)]
 #[clap(
@@ -62,10 +62,10 @@ pub struct Command {
     #[clap(
         short = 'x',
         long = "dont_collapse",
-        about = "Do not collapse nodes on a given set of paths",
+        about = "Do not collapse nodes on a given paths that match given regular expression",
         default_value = " "
     )]
-    pub no_collapse_path: Vec<String>,
+    pub no_collapse_path: String,
 }
 
 // structure for storing reported subgraph
@@ -1116,6 +1116,11 @@ fn main() -> Result<(), io::Error> {
     // initialize command line parser & parse command line arguments
     let params = Command::parse();
 
+    // check if regex of no_collapse_path is valid
+    if !params.no_collapse_path.trim().is_empty() && Regex::new(&params.no_collapse_path).is_err() {
+        panic!("Supplied string \"{}\" is not a valid regular expression", params.no_collapse_path);
+    }
+
     log::info!("loading graph {}", &params.graph);
     let parser = GFAParser::new();
     let gfa: GFA<usize, ()> = parser.parse_file(&params.graph).unwrap();
@@ -1137,23 +1142,25 @@ fn main() -> Result<(), io::Error> {
     }
 
     let mut dont_collapse_nodes: FxHashSet<(usize, usize)> = FxHashSet::default();
-    for path_str in params.no_collapse_path {
-        if !path_str.trim().is_empty() {
-            if !graph.has_path(&path_str.as_bytes()[..]) {
-                panic!("unknown path {}", path_str);
-            }
-            let path_id = graph.get_path_id(&path_str.as_bytes()[..]).unwrap();
-            let path = graph.get_path(&path_id).unwrap();
-            dont_collapse_nodes.extend(path.nodes.iter().map(|&x| {
-                let xid = x.unpack_number() as usize;
-                (xid, *node_lens.get(&xid).unwrap())
-            }));
 
-            log::info!(
-                "flagging nodes of path {} as non-collapsing, total number is now at {}",
-                path_str,
-                dont_collapse_nodes.len()
-            );
+    if !params.no_collapse_path.trim().is_empty() {
+        let re = Regex::new(&params.no_collapse_path).unwrap();
+        for path_id in graph.paths.keys() {
+            let path_name_vec = graph.get_path_name_vec(*path_id).unwrap();
+            let path_name = str::from_utf8(&path_name_vec[..]).unwrap();
+            if re.is_match(&path_name) {
+                let path = graph.get_path(path_id).unwrap();
+                dont_collapse_nodes.extend(path.nodes.iter().map(|&x| {
+                    let xid = x.unpack_number() as usize;
+                    (xid, *node_lens.get(&xid).unwrap())
+                }));
+
+                log::info!(
+                    "flagging nodes of path {} as non-collapsing, total number is now at {}",
+                    path_name,
+                    dont_collapse_nodes.len()
+                );
+            }
         }
     }
 
