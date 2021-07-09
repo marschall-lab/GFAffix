@@ -439,15 +439,17 @@ fn enumerate_path_preserving_shared_affixes(
                 .collect();
             parents.sort();
             // insert child in path-preserving data structure
-            branch
-                .entry((graph.base(u, 0).unwrap(), parents))
-                .or_insert(Vec::new())
-                .push(u);
+            let mut c = graph.base(u, 0).unwrap();
+            // make all letters uppercase
+            if c >= 90 {
+                c -= 32
+            }
+            branch.entry((c, parents)).or_insert(Vec::new()).push(u);
         }
     }
 
-    for ((_, parents), children) in branch.iter() {
-        if children.len() > 1 {
+    for ((c, parents), children) in branch.iter() {
+        if children.len() > 1 && (c == &b'A' || c == &b'C' || c == &b'G' || c == &b'T') {
             let prefix = get_shared_prefix(children, graph)?;
             log::debug!(
                 "identified shared prefix {} between nodes {} originating from parent(s) {}",
