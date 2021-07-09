@@ -654,10 +654,29 @@ fn get_shared_prefix(
     let mut i = 0;
     while sequences[0].len() > i {
         let c: u8 = sequences[0][i];
-        if sequences
-            .iter()
-            .any(|other| other.len() <= i || other[i] != c)
-        {
+
+        if sequences.iter().any(|other| {
+            other.len() <= i
+                || match (other[i], c) {
+                    (b'A', b'A') => false,
+                    (b'A', b'a') => false,
+                    (b'a', b'A') => false,
+                    (b'a', b'a') => false,
+                    (b'C', b'C') => false,
+                    (b'C', b'c') => false,
+                    (b'c', b'C') => false,
+                    (b'c', b'c') => false,
+                    (b'G', b'G') => false,
+                    (b'G', b'g') => false,
+                    (b'g', b'G') => false,
+                    (b'g', b'g') => false,
+                    (b'T', b'T') => false,
+                    (b'T', b't') => false,
+                    (b't', b'T') => false,
+                    (b't', b't') => false,
+                    _ => true,
+                }
+        }) {
             break;
         }
         seq.push(c);
