@@ -1130,21 +1130,23 @@ fn main() -> Result<(), io::Error> {
 
     let mut dont_collapse_nodes: FxHashSet<(usize, usize)> = FxHashSet::default();
     for path_str in params.no_collapse_path {
-        if !path_str.trim().is_empty() && !graph.has_path(&path_str.as_bytes()[..]) {
-            panic!("unknown path {}", path_str);
-        }
-        let path_id = graph.get_path_id(&path_str.as_bytes()[..]).unwrap();
-        let path = graph.get_path(&path_id).unwrap();
-        dont_collapse_nodes.extend(path.nodes.iter().map(|&x| {
-            let xid = x.unpack_number() as usize;
-            (xid, *node_lens.get(&xid).unwrap())
-        }));
+        if !path_str.trim().is_empty() {
+            if !graph.has_path(&path_str.as_bytes()[..]) {
+                panic!("unknown path {}", path_str);
+            }
+            let path_id = graph.get_path_id(&path_str.as_bytes()[..]).unwrap();
+            let path = graph.get_path(&path_id).unwrap();
+            dont_collapse_nodes.extend(path.nodes.iter().map(|&x| {
+                let xid = x.unpack_number() as usize;
+                (xid, *node_lens.get(&xid).unwrap())
+            }));
 
-        log::info!(
-            "flagging nodes of path {} as non-collapsing, total number is now at {}",
-            path_str,
-            dont_collapse_nodes.len()
-        );
+            log::info!(
+                "flagging nodes of path {} as non-collapsing, total number is now at {}",
+                path_str,
+                dont_collapse_nodes.len()
+            );
+        }
     }
 
     //
