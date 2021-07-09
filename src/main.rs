@@ -62,7 +62,7 @@ pub struct Command {
     #[clap(
         short = 'x',
         long = "dont_collapse",
-        about = "Do not collapse given set of paths",
+        about = "Do not collapse nodes on a given set of paths",
         default_value = " "
     )]
     pub no_collapse_path: Vec<String>,
