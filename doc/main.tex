@@ -7,7 +7,7 @@
 \usepackage{amsthm}
 \usepackage{amssymb}
 
-\title{Variant-preserving shared prefixes}
+\title{Walk-preserving shared prefixes}
 \author{Daniel Doerr}
 
 \newtheorem{proposition}{Proposition}
@@ -23,16 +23,16 @@
 
 \maketitle
 
-Let $G = (V, E)$ be a variant graph with node set $V$ representing the set of
+Let $G = (V, E)$ be a variation graph with node set $V$ representing the set of
 \emph{oriented} nodes of $G$. Each node $v \in V$ is associated with a sequence
 $\seq(v)$ representing a DNA molecule. For any given sequence $v \in V$ there exists
 a unique node $\bar v \in V$ with $\seq(\bar v)$ corresponding to the 
 reverse complementary sequence of $\seq(v)$. We further assume that $G$  has a
 \emph{source} node $s$ and a \emph{sink} node \emph{S} $s, S \in V$, such that
-for any $v \in V$ there exists a path $(s,\ldots, v, \ldots S)$. Then the
+for any $v \in V$ there exists a walk $(s,\ldots, v, \ldots S)$. Then the
 \emph{variants} $\mathcal V_G$ of graph $G$ is the set of all possible sequences
 $\seq(s).\seq(v_0)\ldots\seq(v_k).\seq(S)$ such that $(s, v_0, \ldots, v_S)$ is
-a path in $G$. 
+a walk in $G$. 
 
 Further, $\prefix(\seq(u), \seq(v))$ denotes the longest common prefix of
 sequences $\seq(v)$ and $\seq(u)$. Further, we denote by $\parent(v) := \{u
@@ -81,7 +81,7 @@ sequences $\seq(v)$ and $\seq(u)$. Further, we denote by $\parent(v) := \{u
             the proof. 
 
     \item[$\Leftarrow$] Assume $\mathcal V_G = \mathcal V_{G'}$ and $\parent(v)
-        \subset \parent(w)$. Consider some path of graph $G$ of the form $(s,
+        \subset \parent(w)$. Consider some walk of graph $G$ of the form $(s,
         \ldots, p)$, $p \in \parent(w) \setminus \parent(v)$, s.t.
         $\seq(s)\ldots\seq(p) \not\in \{\seq(s)\ldots\seq(p') \mid p' \in
         \parent(v)\}$. Then the set of sequences
