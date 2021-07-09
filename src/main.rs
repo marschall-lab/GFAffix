@@ -28,7 +28,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 #[clap(
     version = "0.1.2",
     author = "Daniel Doerr <daniel.doerr@hhu.de>",
-    about = "Discover path-preserving shared prefixes in multifurcations of a given graph.\n
+    about = "Discover walk-preserving shared prefixes in multifurcations of a given graph.\n
     - Do you want log output? Call program with 'RUST_LOG=info gfaffix ...'
     - Log output not informative enough? Try 'RUST_LOG=debug gfaffix ...'"
 )]
@@ -47,7 +47,7 @@ pub struct Command {
     #[clap(
         short = 't',
         long = "output_transformation",
-        about = "report original nodes and their corresponding paths in refined graph to supplied file",
+        about = "report original nodes and their corresponding walks in refined graph to supplied file",
         default_value = " "
     )]
     pub transformation_out: String,
@@ -62,7 +62,7 @@ pub struct Command {
     #[clap(
         short = 'x',
         long = "dont_collapse",
-        about = "Do not collapse nodes on a given paths that match given regular expression",
+        about = "Do not collapse nodes on a given paths (\"P\" lines) that match given regular expression",
         default_value = " "
     )]
     pub no_collapse_path: String,
@@ -293,7 +293,7 @@ impl CollapseEventTracker {
         for (node_id, node_len) in self.transform.keys() {
             let expansion = self.expand(*node_id, Direction::Right, *node_len);
             log::debug!(
-                "deep-expansion of path {} of node {}:{} into {}",
+                "deep-expansion of walk {} of node {}:{} into {}",
                 self.transform
                     .get(&(*node_id, *node_len))
                     .unwrap()
@@ -421,7 +421,7 @@ impl CollapseEventTracker {
     }
 }
 
-fn enumerate_path_preserving_shared_affixes(
+fn enumerate_walk_preserving_shared_affixes(
     graph: &HashGraph,
     del_subg: &DeletedSubGraph,
     v: Handle,
@@ -438,7 +438,7 @@ fn enumerate_path_preserving_shared_affixes(
                 .filter(|w| !del_subg.node_deleted(&w))
                 .collect();
             parents.sort();
-            // insert child in path-preserving data structure
+            // insert child in walk-preserving data structure
             let mut c = graph.base(u, 0).unwrap();
             // make all letters uppercase
             if c >= 90 {
@@ -694,7 +694,7 @@ fn get_shared_prefix(
     String::from_utf8(seq)
 }
 
-fn find_and_collapse_path_preserving_shared_affixes<W: Write>(
+fn find_and_collapse_walk_preserving_shared_affixes<W: Write>(
     graph: &mut HashGraph,
     out: &mut io::BufWriter<W>,
 ) -> (DeletedSubGraph, CollapseEventTracker) {
@@ -717,7 +717,7 @@ fn find_and_collapse_path_preserving_shared_affixes<W: Write>(
 
                 // process node in forward direction
                 let affixes =
-                    enumerate_path_preserving_shared_affixes(graph, &del_subg, v).unwrap();
+                    enumerate_walk_preserving_shared_affixes(graph, &del_subg, v).unwrap();
                 for affix in affixes.iter() {
                     has_changed |= true;
                     // in each iteration, the set of deleted nodes can change and affect the
@@ -844,7 +844,7 @@ fn check_transform(
         let path_len: usize = path.iter().map(|x| x.2).sum();
         if *vlen != path_len {
             panic!(
-                "length of path {} does not sum up to that of its replacing node of {}:{}",
+                "length of walk {} does not sum up to that of its replacing node of {}:{}",
                 path.iter()
                     .map(|(rid, ro, rlen)| format!(
                         "{}{}:{}",
@@ -890,7 +890,7 @@ fn print_transformations<W: Write>(
     writeln!(
         out,
         "{}",
-        ["original_node", "transformed_path", "bp_length"].join("\t")
+        ["original_node", "transformed_walk", "bp_length"].join("\t")
     )?;
 
     for ((vid, vlen), path) in transform.iter() {
@@ -1169,7 +1169,7 @@ fn main() -> Result<(), io::Error> {
     //
     graph.paths.clear();
 
-    log::info!("identifying path-preserving shared prefixes");
+    log::info!("identifying walk-preserving shared prefixes");
     writeln!(
         out,
         "{}",
@@ -1183,7 +1183,7 @@ fn main() -> Result<(), io::Error> {
     )?;
 
     let (del_subg, mut event_tracker) =
-        find_and_collapse_path_preserving_shared_affixes(&mut graph, &mut out);
+        find_and_collapse_walk_preserving_shared_affixes(&mut graph, &mut out);
 
     if dont_collapse_nodes.len() > 0 {
         log::info!("de-collapse no-collapse handles and update transformation table");
