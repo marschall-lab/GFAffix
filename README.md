@@ -24,12 +24,9 @@ It makes use of the following crates:
 ### From repository
 
 ```
-# install rs-handlegraph from repository
-git clone https://github.com/chfi/rs-handlegraph.git
-cargo build --manifest-path rs-handlegraph/Cargo.toml --release
-
 # install GFAffix
 git clone https://github.com/marschall-lab/GFAffix.git
+# build program
 cargo build --manifest-path GFAffix/Cargo.toml --release
 ```
 
