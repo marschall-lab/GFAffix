@@ -21,13 +21,12 @@ It makes use of the following crates:
 
 ## Installation
 
-### From repository
+## From bioconda channel
+
+Make sure you have [ttps://conda.io](conda) installed!
 
 ```
-# install GFAffix
-git clone https://github.com/marschall-lab/GFAffix.git
-# build program
-cargo build --manifest-path GFAffix/Cargo.toml --release
+conda install -c bioconda gfaffix
 ```
 
 ### From binary release (linux x86\_64)
@@ -41,6 +40,15 @@ tar -xzvf GFAffix-0.1.2_linux_x86_64.tar.gz
 ./GFAffix-0.1.2/gfaffix
 
 
+```
+
+### From repository
+
+```
+# install GFAffix
+git clone https://github.com/marschall-lab/GFAffix.git
+# build program
+cargo build --manifest-path GFAffix/Cargo.toml --release
 ```
 
 ## Command Line Interface
