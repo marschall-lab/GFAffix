@@ -23,7 +23,7 @@ It makes use of the following crates:
 
 ## From bioconda channel
 
-Make sure you have [ttps://conda.io](conda) installed!
+Make sure you have [conda](https://conda.io) installed!
 
 ```
 conda install -c bioconda gfaffix
