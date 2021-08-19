@@ -21,7 +21,7 @@ It makes use of the following crates:
 
 ## Installation
 
-## From bioconda channel
+### From bioconda channel
 
 Make sure you have [conda](https://conda.io) installed!
 
