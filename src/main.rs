@@ -148,7 +148,8 @@ impl CollapseEventTracker {
         splitted_node_pairs: &Vec<(Handle, usize, Handle, Option<(Handle, usize)>)>,
     ) {
         self.events += 1;
-        self.modified_nodes.insert((collapsed_prefix_node.forward(), prefix_len));
+        self.modified_nodes
+            .insert((collapsed_prefix_node.forward(), prefix_len));
         let is_bubble = splitted_node_pairs.iter().all(|x| x.3.is_none());
         if is_bubble {
             self.bubbles += 1;
@@ -190,8 +191,7 @@ impl CollapseEventTracker {
                     .collect::<Vec<String>>()
                     .join("")
             );
-            self.transform
-                .insert((*v, *vlen), replacement.clone());
+            self.transform.insert((v.forward(), *vlen), replacement.clone());
         }
     }
 
@@ -210,7 +210,7 @@ impl CollapseEventTracker {
             if v.is_reverse() {
                 res.reverse();
                 for x in res.iter_mut() {
-                    x.0 = x.0.flip(); 
+                    x.0 = x.0.flip();
                 }
             }
         } else {
@@ -258,17 +258,15 @@ impl CollapseEventTracker {
                 // if copy is also key of transform table, then update key
                 if copies.contains_key(&(v, vlen)) && copy_of_v.forward() != v {
                     let val = self.transform.remove(&(v, vlen)).unwrap();
-                    self.transform.insert((copy_of_v.forward(), vlen.clone()), val);
+                    self.transform
+                        .insert((copy_of_v.forward(), vlen.clone()), val);
                 }
             }
         }
     }
 
-    fn get_expanded_transformation(
-        &self,
-    ) -> FxHashMap<(Handle, usize), Vec<(Handle, usize)>> {
-        let mut res: FxHashMap<(Handle, usize), Vec<(Handle, usize)>> =
-            FxHashMap::default();
+    fn get_expanded_transformation(&self) -> FxHashMap<(Handle, usize), Vec<(Handle, usize)>> {
+        let mut res: FxHashMap<(Handle, usize), Vec<(Handle, usize)>> = FxHashMap::default();
         res.reserve(self.transform.len());
 
         for (v, vlen) in self.transform.keys() {
@@ -362,7 +360,10 @@ impl CollapseEventTracker {
                     v.unpack_number()
                 );
                 // copy incident edges of v onto u
-                for w in graph.neighbors(*v, Direction::Left).collect::<Vec<Handle>>() {
+                for w in graph
+                    .neighbors(*v, Direction::Left)
+                    .collect::<Vec<Handle>>()
+                {
                     log::debug!(
                         "creating duplicate edge <{}{}{}",
                         u.unpack_number(),
@@ -507,8 +508,7 @@ fn collapse(
     //  3. length of original handle
     //  4-5. splitted handle (IMPORTANT: that's generally not equivalent with the replacement
     //  handles!)
-    let mut splitted_node_pairs: Vec<(Handle, usize, Handle, Option<(Handle, usize)>)> =
-        Vec::new();
+    let mut splitted_node_pairs: Vec<(Handle, usize, Handle, Option<(Handle, usize)>)> = Vec::new();
     for (i, v) in shared_prefix_nodes.iter().enumerate() {
         let v_len = graph.node_len(*v);
         if v_len > prefix_len {
@@ -524,7 +524,7 @@ fn collapse(
                 mod_subg.record_added(x);
                 (u, x)
             };
-            splitted_node_pairs.push((*v, v_len, x, Some((u, graph.node_len(u))),));
+            splitted_node_pairs.push((*v, v_len, x, Some((u, graph.node_len(u)))));
             // update dedicated shared prefix node if none has been assigned yet
             log::debug!(
                 "splitting node {}{} into prefix {}{} and suffix {}{}",
@@ -751,12 +751,14 @@ fn transform_path(
 
     for (s, slen) in path.iter() {
         match transform.get(&(s.forward(), *slen)) {
-            Some(us) => res.extend(
-                if s.is_reverse() {
-                    us.iter().rev().map(|(x, _)| x.flip()).collect::<Vec<Handle>>()
-                } else {
-                    us.iter().map(|(x, _)| *x).collect::<Vec<Handle>>()
-                }),
+            Some(us) => res.extend(if s.is_reverse() {
+                us.iter()
+                    .rev()
+                    .map(|(x, _)| x.flip())
+                    .collect::<Vec<Handle>>()
+            } else {
+                us.iter().map(|(x, _)| *x).collect::<Vec<Handle>>()
+            }),
             None => res.push(*s),
         }
     }
@@ -778,7 +780,11 @@ fn unchop(
     let mut one_degree_ext: FxHashSet<Handle> = FxHashSet::default();
     let mut edge_set_loose: FxHashSet<(Handle, Handle)> = FxHashSet::default();
 
-    for v in nodes.clone().into_iter().chain(nodes.clone().into_iter().map(|x| x.flip())) {
+    for v in nodes
+        .clone()
+        .into_iter()
+        .chain(nodes.clone().into_iter().map(|x| x.flip()))
+    {
         let mut it = graph
             .neighbors(v, Direction::Right)
             .filter(|x| !mod_subg.node_deleted(x));
@@ -889,7 +895,8 @@ fn unchop(
             // create new edges for left side of v
             for u in graph
                 .neighbors(*ordered_path.first().unwrap(), Direction::Left)
-                .filter(|x| !mod_subg.node_deleted(x)).collect::<Vec<Handle>>()
+                .filter(|x| !mod_subg.node_deleted(x))
+                .collect::<Vec<Handle>>()
             {
                 graph.create_edge(Edge(u, v));
                 mod_subg.record_added_edge(u, v);
@@ -897,7 +904,8 @@ fn unchop(
             // create new edges for right side of v
             for u in graph
                 .neighbors(*ordered_path.last().unwrap(), Direction::Right)
-                .filter(|x| !mod_subg.node_deleted(x)).collect::<Vec<Handle>>()
+                .filter(|x| !mod_subg.node_deleted(x))
+                .collect::<Vec<Handle>>()
             {
                 graph.create_edge(Edge(v, u));
                 mod_subg.record_added_edge(v, u);
@@ -1186,7 +1194,9 @@ fn parse_and_transform_paths<W: io::Write>(
             str::from_utf8(&path.path_name)?,
             tpath
                 .iter()
-                .map(|v| format!( "{}{}", v.unpack_number(),
+                .map(|v| format!(
+                    "{}{}",
+                    v.unpack_number(),
                     if v.is_reverse() { '-' } else { '+' }
                 ))
                 .collect::<Vec<String>>()
@@ -1251,8 +1261,7 @@ fn parse_and_transform_walks<W: io::Write, R: io::Read>(
             if !cur_el.is_empty() {
                 let sid = usize::from_str(str::from_utf8(&cur_el[1..]).unwrap()).unwrap();
                 let v = Handle::pack(sid, cur_el[0] == b'<');
-                walk.push((v,
-                        *orig_node_lens.get(&v.forward()).unwrap()));
+                walk.push((v, *orig_node_lens.get(&v.forward()).unwrap()));
             }
 
             let tpath = transform_path(&walk, &transform);
@@ -1270,7 +1279,7 @@ fn parse_and_transform_walks<W: io::Write, R: io::Read>(
                     .map(|v| format!(
                         "{}{}",
                         if v.is_reverse() { '<' } else { '>' },
-                        v.unpack_number() 
+                        v.unpack_number()
                     ))
                     .collect::<Vec<String>>()
                     .join("")
@@ -1327,9 +1336,11 @@ fn main() -> Result<(), io::Error> {
             let path_name = str::from_utf8(&path_name_vec[..]).unwrap();
             if re.is_match(&path_name) {
                 let path = graph.get_path(path_id).unwrap();
-                dont_collapse_nodes.extend(path.nodes.iter().map(|&x| {
-                    (x.forward(), *node_lens.get(&x.forward()).unwrap())
-                }));
+                dont_collapse_nodes.extend(
+                    path.nodes
+                        .iter()
+                        .map(|&x| (x.forward(), *node_lens.get(&x.forward()).unwrap())),
+                );
 
                 log::info!(
                     "flagging nodes of path {} as non-collapsing, total number is now at {}",
@@ -1372,26 +1383,26 @@ fn main() -> Result<(), io::Error> {
     log::info!("expand transformation table");
     let transform = event_tracker.get_expanded_transformation();
 
-    log::info!("unchopping modified paths");
-
-    let mut involved_nodes: FxHashSet<Handle> = FxHashSet::default();
-    for p in transform.values() {
-        involved_nodes.extend(p.iter().map(|(vid, _,)| Handle::pack(*vid, false)));
-        involved_nodes.extend(
-            graph
-                .neighbors(p.first().unwrap().0, Direction::Left)
-                .filter(|u| !mod_subg.node_deleted(&u))
-                .collect::<Vec<Handle>>(),
-        );
-        involved_nodes.extend(
-            graph
-                .neighbors(p.last().unwrap().0, Direction::Right)
-                .filter(|u| !mod_subg.node_deleted(&u))
-                .collect::<Vec<Handle>>(),
-        );
-    }
-
-    unchop(&mut graph, &mut mod_subg, involved_nodes);
+//    log::info!("unchopping modified paths");
+//
+//    let mut involved_nodes: FxHashSet<Handle> = FxHashSet::default();
+//    for p in transform.values() {
+//        involved_nodes.extend(p.iter().map(|(vid, _)| Handle::pack(*vid, false)));
+//        involved_nodes.extend(
+//            graph
+//                .neighbors(p.first().unwrap().0, Direction::Left)
+//                .filter(|u| !mod_subg.node_deleted(&u))
+//                .collect::<Vec<Handle>>(),
+//        );
+//        involved_nodes.extend(
+//            graph
+//                .neighbors(p.last().unwrap().0, Direction::Right)
+//                .filter(|u| !mod_subg.node_deleted(&u))
+//                .collect::<Vec<Handle>>(),
+//        );
+//    }
+//
+//    unchop(&mut graph, &mut mod_subg, involved_nodes);
 
     if params.check_transformation {
         log::info!("checking correctness of applied transformations...");
