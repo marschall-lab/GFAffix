@@ -78,10 +78,12 @@ pub struct AffixSubgraph {
 #[derive(Clone, Debug)]
 pub struct DeletedSubGraph {
     pub nodes: FxHashSet<Handle>,
+    pub edges: FxHashSet<Edge>,
 }
 
 impl DeletedSubGraph {
-    fn add(&mut self, v: Handle) -> bool {
+
+    fn add_node(&mut self, v: Handle) -> bool {
         if v.is_reverse() {
             self.nodes.insert(v.flip())
         } else {
@@ -89,17 +91,35 @@ impl DeletedSubGraph {
         }
     }
 
+    fn _normalize_edge(&self, Edge(u, v): &Edge) -> Edge {
+        if u.is_reverse() && v.is_reverse() {
+            Edge(v.flip(), u.flip())
+        } else if u.is_reverse() && u.unpack_number() > v.unpack_number() {
+            Edge(v.flip(), u.flip())
+        } else {
+            Edge(*u, *v)
+        }
+    }
+
+    fn add_edge(&mut self, u: Handle, v: Handle) -> bool {
+        self.edges.insert(self._normalize_edge(&Edge(u, v)))
+    }
+
     fn edge_deleted(&self, u: &Handle, v: &Handle) -> bool {
         let mut res: bool;
-        if u.is_reverse() {
-            res = self.nodes.contains(&u.flip());
-        } else {
-            res = self.nodes.contains(u);
-        }
-        if v.is_reverse() {
-            res |= self.nodes.contains(&v.flip())
-        } else {
-            res |= self.nodes.contains(v)
+        res = self.edges.contains(&self._normalize_edge(&Edge(*u, *v)));
+        
+        if !res {
+            if u.is_reverse() {
+                res = self.nodes.contains(&u.flip());
+            } else {
+                res = self.nodes.contains(u);
+            }
+            if v.is_reverse() {
+                res |= self.nodes.contains(&v.flip());
+            } else {
+                res |= self.nodes.contains(v);
+            }
         }
         res
     }
@@ -115,6 +135,7 @@ impl DeletedSubGraph {
     fn new() -> Self {
         DeletedSubGraph {
             nodes: FxHashSet::default(),
+            edges: FxHashSet::default(),
         }
     }
 }
@@ -610,7 +631,7 @@ fn collapse(
                 None => {
                     // if node coincides with shared prefix (but is not the dedicated shared prefix
                     // node), then all outgoing edges of this node must be transferred to dedicated
-                    // node
+                    // node 
                     let outgoing_edges: Vec<Handle> = graph
                         .neighbors(*u, Direction::Right)
                         .filter(|v| !del_subg.edge_deleted(&u, v))
@@ -633,13 +654,25 @@ fn collapse(
                     }
                 }
             }
-            // mark redundant node as deleted
-            log::debug!(
-                "flag {}{} as deleted",
-                if u.is_reverse() { '<' } else { '>' },
-                u.unpack_number()
-            );
-            del_subg.add(*u);
+
+            if u.flip()  == shared_prefix_node {
+                // node is a palindrome, so let's just delete one edge
+                log::debug!(
+                    "flag edge {}{}{}{} as deleted", if shared_prefix_node.is_reverse() { '<' } else { '>' },
+                    shared_prefix_node.unpack_number(),
+                    if u.is_reverse() { '<' } else { '>' },
+                    u.unpack_number()
+                );
+                del_subg.add_edge(shared_prefix_node, *u);
+            } else {
+                // mark redundant node as deleted
+                log::debug!(
+                    "flag {}{} as deleted",
+                    if u.is_reverse() { '<' } else { '>' },
+                    u.unpack_number()
+                );
+                del_subg.add_node(*u);
+            }
         }
     }
 
