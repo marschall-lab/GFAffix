@@ -655,15 +655,18 @@ fn collapse(
                 }
             }
 
-            if u.flip()  == shared_prefix_node {
-                // node is a palindrome, so let's just delete one edge
-                log::debug!(
-                    "flag edge {}{}{}{} as deleted", if shared_prefix_node.is_reverse() { '<' } else { '>' },
-                    shared_prefix_node.unpack_number(),
-                    if u.is_reverse() { '<' } else { '>' },
-                    u.unpack_number()
-                );
-                del_subg.add_edge(shared_prefix_node, *u);
+            if u.flip() == shared_prefix_node {
+                for v in shared_prefix.parents.iter() {
+                    // node is a palindrome, so let's just delete one edge
+                    log::debug!(
+                        "flag edge {}{}{}{} as deleted", if v.is_reverse() { '<' } else { '>' },
+                        shared_prefix_node.unpack_number(),
+                        if u.is_reverse() { '<' } else { '>' },
+                        u.unpack_number()
+                    );
+                    
+                    del_subg.add_edge(*v, *u);
+                }
             } else {
                 // mark redundant node as deleted
                 log::debug!(
