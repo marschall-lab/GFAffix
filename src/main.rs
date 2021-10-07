@@ -78,7 +78,6 @@ pub struct AffixSubgraph {
 #[derive(Clone, Debug)]
 pub struct DeletedSubGraph {
     pub nodes: FxHashSet<Handle>,
-    pub edges: FxHashSet<Edge>,
 }
 
 impl DeletedSubGraph {
@@ -91,35 +90,17 @@ impl DeletedSubGraph {
         }
     }
 
-    fn _normalize_edge(&self, Edge(u, v): &Edge) -> Edge {
-        if u.is_reverse() && v.is_reverse() {
-            Edge(v.flip(), u.flip())
-        } else if u.is_reverse() && u.unpack_number() > v.unpack_number() {
-            Edge(v.flip(), u.flip())
-        } else {
-            Edge(*u, *v)
-        }
-    }
-
-    fn add_edge(&mut self, u: Handle, v: Handle) -> bool {
-        self.edges.insert(self._normalize_edge(&Edge(u, v)))
-    }
-
     fn edge_deleted(&self, u: &Handle, v: &Handle) -> bool {
         let mut res: bool;
-        res = self.edges.contains(&self._normalize_edge(&Edge(*u, *v)));
-        
-        if !res {
-            if u.is_reverse() {
-                res = self.nodes.contains(&u.flip());
-            } else {
-                res = self.nodes.contains(u);
-            }
-            if v.is_reverse() {
-                res |= self.nodes.contains(&v.flip());
-            } else {
-                res |= self.nodes.contains(v);
-            }
+        if u.is_reverse() {
+            res = self.nodes.contains(&u.flip());
+        } else {
+            res = self.nodes.contains(u);
+        }
+        if v.is_reverse() {
+            res |= self.nodes.contains(&v.flip());
+        } else {
+            res |= self.nodes.contains(v);
         }
         res
     }
@@ -135,7 +116,6 @@ impl DeletedSubGraph {
     fn new() -> Self {
         DeletedSubGraph {
             nodes: FxHashSet::default(),
-            edges: FxHashSet::default(),
         }
     }
 }
@@ -174,56 +154,59 @@ impl CollapseEventTracker {
             Direction::Right
         };
         for (node_id, node_orient, node_len, _, suffix) in splitted_node_pairs {
-            // record transformation of node, even if none took place (which is the case if node v
-            // equals the dedicated shared prefix node
-            let mut replacement: Vec<(usize, Direction, usize)> = Vec::new();
-            replacement.push((prefix_id, prefix_orient, prefix_len));
-            if let Some((v, vlen)) = suffix {
-                replacement.push((
-                    v.unpack_number() as usize,
-                    if v.is_reverse() {
-                        Direction::Left
-                    } else {
-                        Direction::Right
-                    },
-                    *vlen,
-                ));
-                self.modified_nodes
-                    .insert((v.unpack_number() as usize, *vlen));
-            }
-
-            // orient transformation
-            // important notice:
-            // - handle_graph::split_handle() works only in forward direction
-            // - the first node of the split pair an will always be the node itself (again in
-            //   forward direction)
-            if *node_orient == Direction::Left {
-                replacement.reverse();
-                for r in replacement.iter_mut() {
-                    r.1 = if r.1 == Direction::Left {
-                        Direction::Right
-                    } else {
-                        Direction::Left
-                    };
+            // do not report transformations of the same node to itself or to its reverse
+            if node_id != &prefix_id || node_len != &prefix_len {
+                // record transformation of node, even if none took place (which is the case if node v
+                // equals the dedicated shared prefix node
+                let mut replacement: Vec<(usize, Direction, usize)> = Vec::new();
+                replacement.push((prefix_id, prefix_orient, prefix_len));
+                if let Some((v, vlen)) = suffix {
+                    replacement.push((
+                        v.unpack_number() as usize,
+                        if v.is_reverse() {
+                            Direction::Left
+                        } else {
+                            Direction::Right
+                        },
+                        *vlen,
+                    ));
+                    self.modified_nodes
+                        .insert((v.unpack_number() as usize, *vlen));
                 }
+
+                // orient transformation
+                // important notice:
+                // - handle_graph::split_handle() works only in forward direction
+                // - the first node of the split pair an will always be the node itself (again in
+                //   forward direction)
+                if *node_orient == Direction::Left {
+                    replacement.reverse();
+                    for r in replacement.iter_mut() {
+                        r.1 = if r.1 == Direction::Left {
+                            Direction::Right
+                        } else {
+                            Direction::Left
+                        };
+                    }
+                }
+                log::debug!(
+                    "new replacement rule {}:{} -> {}",
+                    node_id,
+                    node_len,
+                    replacement
+                        .iter()
+                        .map(|(rid, ro, rlen)| format!(
+                            "{}{}:{}",
+                            if *ro == Direction::Left { '<' } else { '>' },
+                            rid,
+                            rlen
+                        ))
+                        .collect::<Vec<String>>()
+                        .join("")
+                );
+                self.transform
+                    .insert((*node_id, *node_len), replacement.clone());
             }
-            log::debug!(
-                "new replacement rule {}:{} -> {}",
-                node_id,
-                node_len,
-                replacement
-                    .iter()
-                    .map(|(rid, ro, rlen)| format!(
-                        "{}{}:{}",
-                        if *ro == Direction::Left { '<' } else { '>' },
-                        rid,
-                        rlen
-                    ))
-                    .collect::<Vec<String>>()
-                    .join("")
-            );
-            self.transform
-                .insert((*node_id, *node_len), replacement.clone());
         }
     }
 
@@ -452,11 +435,11 @@ fn enumerate_walk_preserving_shared_affixes(
     let mut branch: FxHashMap<(u8, Vec<Handle>), Vec<Handle>> = FxHashMap::default();
     // traverse multifurcation in the forward direction of the handle
     for u in graph.neighbors(v, Direction::Right) {
-        if !del_subg.node_deleted(&u) {
+        if !del_subg.edge_deleted(&v, &u) {
             // get parents of u
             let mut parents: Vec<Handle> = graph
                 .neighbors(u, Direction::Left)
-                .filter(|w| !del_subg.node_deleted(&w))
+                .filter(|w| !del_subg.edge_deleted(&w, &u))
                 .collect();
             parents.sort();
             // insert child in walk-preserving data structure
@@ -498,11 +481,15 @@ fn enumerate_walk_preserving_shared_affixes(
                     .collect::<Vec<String>>()
                     .join(",")
             );
-            res.push(AffixSubgraph {
-                sequence: prefix,
-                parents: parents.clone(),
-                shared_prefix_nodes: children.clone(),
-            });
+            if prefix.len() == graph.node_len(children[0]) && children.len() == 2 && children[0] == children[1].flip() {
+                log::info!("prefix is a palindromic node, ignoring this case for now..");
+            } else {
+                res.push(AffixSubgraph {
+                    sequence: prefix,
+                    parents: parents.clone(),
+                    shared_prefix_nodes: children.clone(),
+                });
+            }
         }
     }
 
@@ -655,18 +642,10 @@ fn collapse(
                 }
             }
 
+            // do nothing in case of a palindrome 
             if u.flip() == shared_prefix_node {
-                for v in shared_prefix.parents.iter() {
-                    // node is a palindrome, so let's just delete one edge
-                    log::debug!(
-                        "flag edge {}{}{}{} as deleted", if v.is_reverse() { '<' } else { '>' },
-                        shared_prefix_node.unpack_number(),
-                        if u.is_reverse() { '<' } else { '>' },
-                        u.unpack_number()
-                    );
-                    
-                    del_subg.add_edge(*v, *u);
-                }
+                log::debug!( "shared prefix is a palindromic node >{}, do nothing... ", 
+                    u.unpack_number());
             } else {
                 // mark redundant node as deleted
                 log::debug!(
@@ -875,7 +854,7 @@ fn check_transform(
     old_graph: &HashGraph,
     new_graph: &HashGraph,
     transform: &FxHashMap<(usize, usize), Vec<(usize, Direction, usize)>>,
-) {
+    del_subg: &DeletedSubGraph) {
     for ((vid, vlen), path) in transform.iter() {
         let path_len: usize = path.iter().map(|x| x.2).sum();
         if *vlen != path_len {
@@ -895,6 +874,29 @@ fn check_transform(
             );
         }
 
+        if path.len() > 1 {
+            for i in 0..(path.len()-1) {
+                let u = Handle::pack(path[i].0, path[i].1 == Direction::Left);
+                let v = Handle::pack(path[i+1].0, path[i+1].1 == Direction::Left);
+                if del_subg.edge_deleted(&u, &v) {
+                    panic!("edge {}{}{}{} is flagged as deleted new graph", 
+                        if u.is_reverse() { '<' } else { '>' },
+                        u.unpack_number(),
+                        if v.is_reverse() { '<' } else { '>' },
+                        v.unpack_number());
+                }
+            }
+        } else {
+            let v = Handle::pack(path[0].0, path[0].1 == Direction::Left);
+            if del_subg.node_deleted(&v) {
+                panic!("node {}{} is flagged as deleted new graph", 
+                    if v.is_reverse() { '<' } else { '>' },
+                    v.unpack_number());
+            }
+        }
+
+        // not all nodes of the transformation table are "old" nodes, but some have been created 
+        // by the affix-reduction 
         let v = Handle::pack(*vid, false);
         if old_graph.has_node(v.id()) && old_graph.node_len(v) == *vlen {
             let old_seq = old_graph.sequence_vec(v);
@@ -914,7 +916,7 @@ fn check_transform(
                     String::from_utf8(new_seq).unwrap()
                     );
             }
-        }
+        } 
     }
 }
 
@@ -1232,7 +1234,7 @@ fn main() -> Result<(), io::Error> {
     if params.check_transformation {
         log::info!("checking correctness of applied transformations...");
         let old_graph = HashGraph::from_gfa(&gfa);
-        check_transform(&old_graph, &graph, &transform);
+        check_transform(&old_graph, &graph, &transform, &del_subg);
         log::info!("all correct!");
     }
 
