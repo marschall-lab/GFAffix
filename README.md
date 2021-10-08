@@ -1,3 +1,7 @@
+[![Anaconda-Server Badge](https://anaconda.org/bioconda/gfaffix/badges/installer/conda.svg)](https://conda.anaconda.org/bioconda)
+[![Anaconda-Server Badge](https://anaconda.org/bioconda/gfaffix/badges/platforms.svg)](https://anaconda.org/bioconda/gfaffix)
+[![Anaconda-Server Badge](https://anaconda.org/bioconda/gfaffix/badges/license.svg)](https://anaconda.org/bioconda/gfaffix)
+
 # GFAffix
 
 GFAffix identifies walk-preserving shared affixes in variation graphs and collapses them into a non-redundant graph structure.
