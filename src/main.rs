@@ -8,7 +8,7 @@ use std::io::prelude::*;
 use std::str::{self, FromStr};
 
 /* crate use */
-use clap::Clap;
+use clap::Parser;
 use gfa::{
     gfa::{orientation::Orientation, GFA},
     parser::GFAParser,
@@ -24,7 +24,7 @@ use quick_csv::Csv;
 use regex::Regex;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-#[derive(clap::Clap, Debug)]
+#[derive(clap::Parser, Debug)]
 #[clap(
     version = "0.1.2.2",
     author = "Daniel Doerr <daniel.doerr@hhu.de>",
