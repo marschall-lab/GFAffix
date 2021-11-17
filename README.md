@@ -37,7 +37,7 @@ conda install -c bioconda gfaffix
 
 ```
 
-wget --no-check-certificate -c https://github.com/marschall-lab/GFAffix/releases/download/0.1.2/GFAffix-0.1.2.3_linux_x86_64.tar.gz 
+wget --no-check-certificate -c https://github.com/marschall-lab/GFAffix/releases/download/0.1.2.3/GFAffix-0.1.2.3_linux_x86_64.tar.gz 
 tar -xzvf GFAffix-0.1.2.3_linux_x86_64.tar.gz 
 
 # you are ready to go! 
