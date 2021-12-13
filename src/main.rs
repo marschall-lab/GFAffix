@@ -24,7 +24,7 @@ use quick_csv::Csv;
 use regex::Regex;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-#[derive(clap::Parser, Debug)]
+#[derive(Parser, Debug)]
 #[clap(
     version = "0.1.2.3",
     author = "Daniel Doerr <daniel.doerr@hhu.de>",
@@ -33,13 +33,13 @@ use rustc_hash::{FxHashMap, FxHashSet};
     - Log output not informative enough? Try 'RUST_LOG=debug gfaffix ...'"
 )]
 pub struct Command {
-    #[clap(index = 1, about = "graph in GFA1 format", required = true)]
+    #[clap(index = 1, help = "graph in GFA1 format", required = true)]
     pub graph: String,
 
     #[clap(
         short = 'o',
         long = "output_refined",
-        about = "write refined graph in GFA1 format to supplied file",
+        help = "write refined graph in GFA1 format to supplied file",
         default_value = " "
     )]
     pub refined_graph_out: String,
@@ -47,7 +47,7 @@ pub struct Command {
     #[clap(
         short = 't',
         long = "output_transformation",
-        about = "report original nodes and their corresponding walks in refined graph to supplied file",
+        help = "report original nodes and their corresponding walks in refined graph to supplied file",
         default_value = " "
     )]
     pub transformation_out: String,
@@ -55,14 +55,14 @@ pub struct Command {
     #[clap(
         short = 'c',
         long = "check_transformation",
-        about = "Verifies that the transformed parts of the graphs spell out the identical sequence as in the original graph. Only for debugging purposes."
+        help = "Verifies that the transformed parts of the graphs spell out the identical sequence as in the original graph. Only for debugging purposes."
     )]
     pub check_transformation: bool,
 
     #[clap(
         short = 'x',
         long = "dont_collapse",
-        about = "Do not collapse nodes on a given paths (\"P\" lines) that match given regular expression",
+        help = "Do not collapse nodes on a given paths (\"P\" lines) that match given regular expression",
         default_value = " "
     )]
     pub no_collapse_path: String,
