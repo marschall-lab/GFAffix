@@ -26,7 +26,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 #[derive(Parser, Debug)]
 #[clap(
-    version = "0.1.2.4",
+    version = "0.1.2.5",
     author = "Daniel Doerr <daniel.doerr@hhu.de>",
     about = "Discover walk-preserving shared prefixes in multifurcations of a given graph.\n
     - Do you want log output? Call program with 'RUST_LOG=info gfaffix ...'

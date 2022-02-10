@@ -59,7 +59,7 @@ cargo build --manifest-path GFAffix/Cargo.toml --release
 
 ```
 $ gfaffix --help
-gfaffix 0.1.2.3
+gfaffix 0.1.2.5
 Daniel Doerr <daniel.doerr@hhu.de>
 Discover walk-preserving shared prefixes in multifurcations of a given graph.
 
