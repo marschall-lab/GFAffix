@@ -1,5 +1,4 @@
 /* standard use */
-use std::cmp::Ordering;
 use std::collections::VecDeque;
 use std::error::Error;
 use std::fs;
@@ -26,7 +25,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 #[derive(Parser, Debug)]
 #[clap(
-    version = "0.1.2.5",
+    version = "0.1.3",
     author = "Daniel Doerr <daniel.doerr@hhu.de>",
     about = "Discover walk-preserving shared prefixes in multifurcations of a given graph.\n
     - Do you want log output? Call program with 'RUST_LOG=info gfaffix ...'
@@ -39,7 +38,7 @@ pub struct Command {
     #[clap(
         short = 'o',
         long = "output_refined",
-        help = "write refined graph in GFA1 format to supplied file",
+        help = "Write refined graph in GFA1 format to supplied file",
         default_value = " "
     )]
     pub refined_graph_out: String,
@@ -47,7 +46,7 @@ pub struct Command {
     #[clap(
         short = 't',
         long = "output_transformation",
-        help = "report original nodes and their corresponding walks in refined graph to supplied file",
+        help = "Report original nodes and their corresponding walks in refined graph to supplied file",
         default_value = " "
     )]
     pub transformation_out: String,
@@ -55,7 +54,7 @@ pub struct Command {
     #[clap(
         short = 'c',
         long = "check_transformation",
-        help = "Verifies that the transformed parts of the graphs spell out the identical sequence as in the original graph. Only for debugging purposes."
+        help = "Verifies that the transformed parts of the graphs spell out the identical sequence as in the original graph. Only for debugging purposes"
     )]
     pub check_transformation: bool,
 
@@ -81,7 +80,6 @@ pub struct DeletedSubGraph {
 }
 
 impl DeletedSubGraph {
-
     fn add_node(&mut self, v: Handle) -> bool {
         if v.is_reverse() {
             self.nodes.insert(v.flip())
@@ -384,10 +382,9 @@ impl CollapseEventTracker {
                 // copy incident edges of v onto u
                 for w in graph.neighbors(v, Direction::Left).collect::<Vec<Handle>>() {
                     log::debug!(
-                        "creating duplicate edge <{}{}{}",
+                        "creating duplicate edge <{}{}",
                         u.unpack_number(),
-                        if w.is_reverse() { '<' } else { '>' },
-                        w.unpack_number()
+                        v2str(&w)
                     );
                     graph.create_edge(Edge(u.flip(), w.flip()));
                 }
@@ -396,10 +393,9 @@ impl CollapseEventTracker {
                     .collect::<Vec<Handle>>()
                 {
                     log::debug!(
-                        "creating duplicate edge >{}{}{}",
+                        "creating duplicate edge >{}{}",
                         u.unpack_number(),
-                        if w.is_reverse() { '<' } else { '>' },
-                        w.unpack_number()
+                        v2str(&w)
                     );
                     graph.create_edge(Edge(u, w));
                 }
@@ -425,6 +421,15 @@ impl CollapseEventTracker {
     }
 }
 
+pub fn v2str(v: &Handle) -> String {
+    format!(
+        "{}{}",
+        if v.is_reverse() { '<' } else { '>' },
+        v.unpack_number()
+    )
+}
+
+
 fn enumerate_walk_preserving_shared_affixes(
     graph: &HashGraph,
     del_subg: &DeletedSubGraph,
@@ -432,7 +437,7 @@ fn enumerate_walk_preserving_shared_affixes(
 ) -> Result<Vec<AffixSubgraph>, Box<dyn Error>> {
     let mut res: Vec<AffixSubgraph> = Vec::new();
 
-    let mut branch: FxHashMap<(u8, Vec<Handle>), Vec<Handle>> = FxHashMap::default();
+    let mut branch: FxHashMap<(u8, Vec<Handle>), VecDeque<Handle>> = FxHashMap::default();
     // traverse multifurcation in the forward direction of the handle
     for u in graph.neighbors(v, Direction::Right) {
         if !del_subg.edge_deleted(&v, &u) {
@@ -448,13 +453,29 @@ fn enumerate_walk_preserving_shared_affixes(
             if c >= 90 {
                 c -= 32
             }
-            branch.entry((c, parents)).or_insert(Vec::new()).push(u);
+            let children = branch.entry((c, parents)).or_insert(VecDeque::new());
+
+            // Sort handles with shared prefix so that reversed ones come first! This is important
+            // for the case that two shared prefixes correspond to the same node, one in forward,
+            // and one in backward dirction (e.g. >1209, <1209 share prefix 'C'). In those cases,
+            // the code that splits handles only works iff the backward oriented handle is split
+            // first (e.g., <1209 is split into <329203 and <1209) and then the forward oriented
+            // handle (e.g., truncated handle >1209 is split into >1209 and 329204), Subsequently,
+            // either >1209 or >329203 is deleted, with the other being advanced as dedicated
+            // shared prefix node.
+
+            if u.is_reverse() {
+                children.push_front(u);
+            } else {
+                children.push_back(u);
+            }
         }
     }
 
-    for ((c, parents), children) in branch.iter() {
-        if children.len() > 1 && (c == &b'A' || c == &b'C' || c == &b'G' || c == &b'T') {
-            let prefix = get_shared_prefix(children, graph)?;
+    for ((c, parents), children) in branch.into_iter() {
+        if children.len() > 1 && (c == b'A' || c == b'C' || c == b'G' || c == b'T') {
+            let mut children_vec: Vec<Handle> = children.into();
+            let prefix = get_shared_prefix(&children_vec, graph)?;
             log::debug!(
                 "identified shared prefix {} between nodes {} originating from parent(s) {}",
                 if prefix.len() > 10 {
@@ -462,32 +483,39 @@ fn enumerate_walk_preserving_shared_affixes(
                 } else {
                     prefix.clone()
                 },
-                children
-                    .iter()
-                    .map(|v| format!(
-                        "{}{}",
-                        if v.is_reverse() { '<' } else { '>' },
-                        v.unpack_number()
-                    ))
-                    .collect::<Vec<String>>()
-                    .join(","),
-                parents
-                    .iter()
-                    .map(|v| format!(
-                        "{}{}",
-                        if v.is_reverse() { '<' } else { '>' },
-                        v.unpack_number()
-                    ))
-                    .collect::<Vec<String>>()
-                    .join(",")
+                children_vec.iter().map(v2str).collect::<Vec<String>>().join(","),
+                parents.iter().map(v2str).collect::<Vec<String>>().join(",")
             );
-            if prefix.len() == graph.node_len(children[0]) && children.len() == 2 && children[0] == children[1].flip() {
-                log::info!("prefix is a palindromic node, ignoring this case for now..");
-            } else {
+            let full_length: Vec<Handle> = children_vec
+                .clone()
+                .into_iter()
+                .filter(|&x| prefix.len() == graph.node_len(x))
+                .collect();
+            if full_length.len() > 1 {
+                let mut dedup: FxHashSet<Handle> = FxHashSet::default();
+                for v in full_length.iter() {
+                    let u = v.forward();
+                    if dedup.contains(&u) {
+                        // found palindrome! Let's remove the forward version of it
+                        log::info!("node {} is a palindrome", u.unpack_number());
+                        // remember that children_vec is ordered, i.e., reverse followed by forward
+                        // nodes? So if the palindromic forward node is removed and replaced by the
+                        // last element (that's what swap_remove does), this order is still
+                        // maintained
+                        children_vec
+                            .swap_remove(children_vec.iter().position(|&w| w == u).unwrap());
+                    } else {
+                        dedup.insert(u);
+                    }
+                }
+            }
+            if children_vec.len() > 1 {
+                // we are removing children if nodes are palindromes, so if only one node is left,
+                // don't do anything
                 res.push(AffixSubgraph {
                     sequence: prefix,
                     parents: parents.clone(),
-                    shared_prefix_nodes: children.clone(),
+                    shared_prefix_nodes: children_vec,
                 });
             }
         }
@@ -504,25 +532,11 @@ fn collapse(
 ) -> Handle {
     let prefix_len = shared_prefix.sequence.len();
 
-    // Sort handles with shared prefix so that reversed ones come first! This is important for the
-    // case that two shared prefixes correspond to the same node, one in forward, and one in
-    // backward dirction (e.g. >1209, <1209 share prefix 'C'). In those cases, the code that splits
-    // handles only works iff the backward oriented handle is split first (e.g., <1209 is split
-    // into <329203 and <1209) and then the forward oriented handle (e.g., truncated handle >1209
-    // is split into >1209 and 329204), Subsequently, either >1209 or >329203 is deleted, with the
-    // other being advanced as dedicated shared prefix node.
-
-    let mut shared_prefix_nodes = shared_prefix.shared_prefix_nodes.clone();
-    shared_prefix_nodes.sort_by(|x, y| match (x.is_reverse(), y.is_reverse()) {
-        (true, false) => Ordering::Less,
-        (false, true) => Ordering::Greater,
-        _ => Ordering::Equal,
-    });
-
     // update graph in two passes:
-    //  1. split handles into shared prefix and distinct suffix and appoint dedicated shared
+    //  1. split handle into shared prefix and distinct suffix and appoint dedicated shared
     //  prefix node
-    let mut shared_prefix_node_pos: usize = 0;
+    //  2. update deleted edge set, reassign outgoing edges of "empty" nodes to dedicated shared
+    //     prefix node
     // each element in splitted_node_pairs is of the form:
     //  1. node ID of original handle
     //  2. direction of original handle
@@ -531,7 +545,10 @@ fn collapse(
     //  handles!)
     let mut splitted_node_pairs: Vec<(usize, Direction, usize, Handle, Option<(Handle, usize)>)> =
         Vec::new();
-    for (i, v) in shared_prefix_nodes.iter().enumerate() {
+
+    let mut shared_prefix_node : Option<Handle> = None;
+
+    for v in shared_prefix.shared_prefix_nodes.iter() {
         let v_len = graph.node_len(*v);
         let node_id = v.unpack_number() as usize;
         let node_orient = if v.is_reverse() {
@@ -548,6 +565,10 @@ fn collapse(
             } else {
                 graph.split_handle(*v, prefix_len)
             };
+            // update dedicated shared prefix node if none has been assigned yet
+            log::debug!("splitting node {} into prefix {} and suffix {}", 
+                v2str(v), v2str(&x), v2str(&u));
+
             splitted_node_pairs.push((
                 node_id,
                 node_orient,
@@ -555,115 +576,64 @@ fn collapse(
                 x,
                 Some((u, graph.node_len(u))),
             ));
-            // update dedicated shared prefix node if none has been assigned yet
-            log::debug!(
-                "splitting node {}{} into prefix {}{} and suffix {}{}",
-                if v.is_reverse() { '<' } else { '>' },
-                v.unpack_number(),
-                if x.is_reverse() { '<' } else { '>' },
-                x.unpack_number(),
-                if u.is_reverse() { '<' } else { '>' },
-                u.unpack_number()
-            );
-        } else {
-            // always use a node as dedicated shared prefix node if that node coincides with the
-            // prefix
-            shared_prefix_node_pos = i;
-            splitted_node_pairs.push((node_id, node_orient, v_len, *v, None));
-            log::debug!(
-                "node {}{} matches prefix {}",
-                if v.is_reverse() { '<' } else { '>' },
-                v.unpack_number(),
-                &shared_prefix.sequence
-            );
-        }
-    }
 
-    //  2. update deleted edge set, reassign outgoing edges of "empty" nodes to dedicated shared
-    //     prefix node
-    // there will be always a shared prefix node, so this condition is always true
-    let shared_prefix_split = splitted_node_pairs[shared_prefix_node_pos];
-    let shared_prefix_node = shared_prefix_split.3;
-    log::debug!(
-        "node {}{} is dedicated shared prefix node",
-        if shared_prefix_node.is_reverse() {
-            '<'
-        } else {
-            '>'
-        },
-        shared_prefix_node.unpack_number()
-    );
-
-    for (_, _, _, u, maybe_v) in splitted_node_pairs.iter() {
-        if *u != shared_prefix_node {
-            // rewrire outgoing edges
-            match maybe_v {
-                Some((v, _)) => {
+            match shared_prefix_node {
+                None => {
+                    log::debug!("node {} is dedicated shared prefix node", v2str(&x));
+                    shared_prefix_node = Some(x);
+                },
+                Some(w) => {
                     // make all suffixes spring from shared suffix node
-                    if !graph.has_edge(shared_prefix_node, *v) {
-                        graph.create_edge(Edge(shared_prefix_node, *v));
-                        log::debug!(
-                            "create edge {}{}{}{}",
-                            if shared_prefix_node.is_reverse() {
-                                '<'
-                            } else {
-                                '>'
-                            },
-                            shared_prefix_node.unpack_number(),
-                            if v.is_reverse() { '<' } else { '>' },
-                            v.unpack_number(),
-                        );
+                    if !graph.has_edge(w, u) {
+                        graph.create_edge(Edge(w, u));
+                        log::debug!("create edge {}{}", v2str(&w), v2str(&u));
+                        // mark redundant node as deleted
+                        log::debug!("flag {} as deleted", v2str(&x));
+                        del_subg.add_node(x);
                     }
                 }
+            };
+        } else {
+            splitted_node_pairs.push((node_id, node_orient, v_len, *v, None));
+            log::debug!("node {} matches prefix {}", v2str(v), 
+                if prefix_len > 10 {
+                    shared_prefix.sequence[..10].to_string() + "..."
+                } else {
+                    shared_prefix.sequence.clone()
+                });
+            match shared_prefix_node {
                 None => {
+                    log::debug!("node {} is dedicated shared prefix node", v2str(v));
+                    shared_prefix_node = Some(*v);
+                },
+                Some(w) => {
                     // if node coincides with shared prefix (but is not the dedicated shared prefix
                     // node), then all outgoing edges of this node must be transferred to dedicated
-                    // node 
+                    // node
                     let outgoing_edges: Vec<Handle> = graph
-                        .neighbors(*u, Direction::Right)
-                        .filter(|v| !del_subg.edge_deleted(&u, v))
+                        .neighbors(*v, Direction::Right)
+                        .filter(|u| !del_subg.edge_deleted(&v, u))
                         .collect();
                     for x in outgoing_edges {
-                        if !graph.has_edge(shared_prefix_node, x) {
-                            graph.create_edge(Edge(shared_prefix_node, x));
-                            log::debug!(
-                                "create edge {}{}{}{}",
-                                if shared_prefix_node.is_reverse() {
-                                    '<'
-                                } else {
-                                    '>'
-                                },
-                                shared_prefix_node.unpack_number(),
-                                if x.is_reverse() { '<' } else { '>' },
-                                x.unpack_number(),
-                            );
+                        if !graph.has_edge(w, x) {
+                            graph.create_edge(Edge(w, x));
+                            log::debug!("create edge {}{}", v2str(&w), v2str(&x));
                         }
                     }
+                    // mark redundant node as deleted
+                    log::debug!("flag {} as deleted", v2str(v));
+                    del_subg.add_node(*v);
                 }
-            }
-
-            // do nothing in case of a palindrome 
-            if u.flip() == shared_prefix_node {
-                log::debug!( "shared prefix is a palindromic node >{}, do nothing... ", 
-                    u.unpack_number());
-            } else {
-                // mark redundant node as deleted
-                log::debug!(
-                    "flag {}{} as deleted",
-                    if u.is_reverse() { '<' } else { '>' },
-                    u.unpack_number()
-                );
-                del_subg.add_node(*u);
-            }
+            };
         }
     }
 
     event_tracker.report(
-        shared_prefix_node,
-        graph.node_len(shared_prefix_node),
+        shared_prefix_node.unwrap(),
+        graph.node_len(shared_prefix_node.unwrap()),
         &splitted_node_pairs,
     );
-    shared_prefix_node
+    shared_prefix_node.unwrap()
 }
 
 fn get_shared_prefix(
@@ -711,7 +681,7 @@ fn get_shared_prefix(
 
 fn find_and_collapse_walk_preserving_shared_affixes<W: Write>(
     graph: &mut HashGraph,
-    out: &mut io::BufWriter<W>,
+    out: &mut io::BufWriter<W>
 ) -> (DeletedSubGraph, CollapseEventTracker) {
     let mut del_subg = DeletedSubGraph::new();
 
@@ -724,11 +694,7 @@ fn find_and_collapse_walk_preserving_shared_affixes<W: Write>(
         queue.extend(graph.handles().chain(graph.handles().map(|v| v.flip())));
         while let Some(v) = queue.pop_front() {
             if !del_subg.node_deleted(&v) {
-                log::debug!(
-                    "processing oriented node {}{}",
-                    if v.is_reverse() { '<' } else { '>' },
-                    v.unpack_number()
-                );
+                log::debug!("processing oriented node {}", v2str(&v));
 
                 // process node in forward direction
                 let affixes =
@@ -761,6 +727,7 @@ fn find_and_collapse_walk_preserving_shared_affixes<W: Write>(
                         }
                         let shared_prefix_node =
                             collapse(graph, affix, &mut del_subg, &mut event_tracker);
+                        
                         queue.push_back(shared_prefix_node);
                         queue.push_back(shared_prefix_node.flip());
                     }
@@ -854,7 +821,8 @@ fn check_transform(
     old_graph: &HashGraph,
     new_graph: &HashGraph,
     transform: &FxHashMap<(usize, usize), Vec<(usize, Direction, usize)>>,
-    del_subg: &DeletedSubGraph) {
+    del_subg: &DeletedSubGraph,
+) {
     for ((vid, vlen), path) in transform.iter() {
         let path_len: usize = path.iter().map(|x| x.2).sum();
         if *vlen != path_len {
@@ -875,28 +843,32 @@ fn check_transform(
         }
 
         if path.len() > 1 {
-            for i in 0..(path.len()-1) {
+            for i in 0..(path.len() - 1) {
                 let u = Handle::pack(path[i].0, path[i].1 == Direction::Left);
-                let v = Handle::pack(path[i+1].0, path[i+1].1 == Direction::Left);
+                let v = Handle::pack(path[i + 1].0, path[i + 1].1 == Direction::Left);
                 if del_subg.edge_deleted(&u, &v) {
-                    panic!("edge {}{}{}{} is flagged as deleted new graph", 
+                    panic!(
+                        "edge {}{}{}{} is flagged as deleted new graph",
                         if u.is_reverse() { '<' } else { '>' },
                         u.unpack_number(),
                         if v.is_reverse() { '<' } else { '>' },
-                        v.unpack_number());
+                        v.unpack_number()
+                    );
                 }
             }
         } else {
             let v = Handle::pack(path[0].0, path[0].1 == Direction::Left);
             if del_subg.node_deleted(&v) {
-                panic!("node {}{} is flagged as deleted new graph", 
+                panic!(
+                    "node {}{} is flagged as deleted new graph",
                     if v.is_reverse() { '<' } else { '>' },
-                    v.unpack_number());
+                    v.unpack_number()
+                );
             }
         }
 
-        // not all nodes of the transformation table are "old" nodes, but some have been created 
-        // by the affix-reduction 
+        // not all nodes of the transformation table are "old" nodes, but some have been created
+        // by the affix-reduction
         let v = Handle::pack(*vid, false);
         if old_graph.has_node(v.id()) && old_graph.node_len(v) == *vlen {
             let old_seq = old_graph.sequence_vec(v);
@@ -916,7 +888,7 @@ fn check_transform(
                     String::from_utf8(new_seq).unwrap()
                     );
             }
-        } 
+        }
     }
 }
 
@@ -972,28 +944,8 @@ fn spell_walk(graph: &HashGraph, walk: &Vec<(usize, Direction, usize)>) -> Vec<u
 }
 
 fn print<W: io::Write>(affix: &AffixSubgraph, out: &mut io::BufWriter<W>) -> Result<(), io::Error> {
-    let parents: Vec<String> = affix
-        .parents
-        .iter()
-        .map(|&v| {
-            format!(
-                "{}{}",
-                if v.is_reverse() { '<' } else { '>' },
-                v.unpack_number(),
-            )
-        })
-        .collect();
-    let children: Vec<String> = affix
-        .shared_prefix_nodes
-        .iter()
-        .map(|&v| {
-            format!(
-                "{}{}",
-                if v.is_reverse() { '<' } else { '>' },
-                v.unpack_number(),
-            )
-        })
-        .collect();
+    let parents: Vec<String> = affix.parents.iter().map(v2str).collect();
+    let children: Vec<String> = affix.shared_prefix_nodes.iter().map(v2str).collect();
     writeln!(
         out,
         "{}\t{}\t{}\t{}",
@@ -1156,7 +1108,10 @@ fn main() -> Result<(), io::Error> {
 
     // check if regex of no_collapse_path is valid
     if !params.no_collapse_path.trim().is_empty() && Regex::new(&params.no_collapse_path).is_err() {
-        panic!("Supplied string \"{}\" is not a valid regular expression", params.no_collapse_path);
+        panic!(
+            "Supplied string \"{}\" is not a valid regular expression",
+            params.no_collapse_path
+        );
     }
 
     log::info!("loading graph {}", &params.graph);

@@ -37,11 +37,11 @@ conda install -c bioconda gfaffix
 
 ```
 
-wget --no-check-certificate -c https://github.com/marschall-lab/GFAffix/releases/download/0.1.2.3/GFAffix-0.1.2.3_linux_x86_64.tar.gz 
-tar -xzvf GFAffix-0.1.2.3_linux_x86_64.tar.gz 
+wget --no-check-certificate -c https://github.com/marschall-lab/GFAffix/releases/download/0.1.3/GFAffix-0.1.3_linux_x86_64.tar.gz 
+tar -xzvf GFAffix-0.1.3_linux_x86_64.tar.gz 
 
 # you are ready to go! 
-./GFAffix-0.1.2.3/gfaffix
+./GFAffix-0.1.3/gfaffix
 
 
 ```
@@ -59,7 +59,7 @@ cargo build --manifest-path GFAffix/Cargo.toml --release
 
 ```
 $ gfaffix --help
-gfaffix 0.1.2.5
+gfaffix 0.1.3
 Daniel Doerr <daniel.doerr@hhu.de>
 Discover walk-preserving shared prefixes in multifurcations of a given graph.
 
@@ -67,29 +67,32 @@ Discover walk-preserving shared prefixes in multifurcations of a given graph.
     - Log output not informative enough? Try 'RUST_LOG=debug gfaffix ...'
 
 USAGE:
-    gfaffix [FLAGS] [OPTIONS] <graph>
+    gfaffix [OPTIONS] <GRAPH>
 
 ARGS:
-    <graph>    graph in GFA1 format
-
-FLAGS:
-    -c, --check_transformation    Verifies that the transformed parts of the graphs spell out the
-                                  identical sequence as in the original graph. Only for debugging
-                                  purposes.
-    -h, --help                    Prints help information
-    -V, --version                 Prints version information
+    <GRAPH>    graph in GFA1 format
 
 OPTIONS:
-    -x, --dont_collapse <no-collapse-path>
+    -c, --check_transformation
+            Verifies that the transformed parts of the graphs spell out the identical sequence as in
+            the original graph. Only for debugging purposes
+
+    -h, --help
+            Print help information
+
+    -o, --output_refined <REFINED_GRAPH_OUT>
+            Write refined graph in GFA1 format to supplied file [default: " "]
+
+    -t, --output_transformation <TRANSFORMATION_OUT>
+            Report original nodes and their corresponding walks in refined graph to supplied file
+            [default: " "]
+
+    -V, --version
+            Print version information
+
+    -x, --dont_collapse <NO_COLLAPSE_PATH>
             Do not collapse nodes on a given paths ("P" lines) that match given regular expression
-            [default:  ]
-
-    -o, --output_refined <refined-graph-out>
-            write refined graph in GFA1 format to supplied file [default:  ]
-
-    -t, --output_transformation <transformation-out>
-            report original nodes and their corresponding walks in refined graph to supplied file
-            [default:  ]
+            [default: " "]
 ```
 
 ## Execution
