@@ -429,7 +429,6 @@ pub fn v2str(v: &Handle) -> String {
     )
 }
 
-
 fn enumerate_walk_preserving_shared_affixes(
     graph: &HashGraph,
     del_subg: &DeletedSubGraph,
@@ -483,7 +482,11 @@ fn enumerate_walk_preserving_shared_affixes(
                 } else {
                     prefix.clone()
                 },
-                children_vec.iter().map(v2str).collect::<Vec<String>>().join(","),
+                children_vec
+                    .iter()
+                    .map(v2str)
+                    .collect::<Vec<String>>()
+                    .join(","),
                 parents.iter().map(v2str).collect::<Vec<String>>().join(",")
             );
             let full_length: Vec<Handle> = children_vec
@@ -546,7 +549,7 @@ fn collapse(
     let mut splitted_node_pairs: Vec<(usize, Direction, usize, Handle, Option<(Handle, usize)>)> =
         Vec::new();
 
-    let mut shared_prefix_node : Option<Handle> = None;
+    let mut shared_prefix_node: Option<Handle> = None;
 
     for v in shared_prefix.shared_prefix_nodes.iter() {
         let v_len = graph.node_len(*v);
@@ -566,8 +569,12 @@ fn collapse(
                 graph.split_handle(*v, prefix_len)
             };
             // update dedicated shared prefix node if none has been assigned yet
-            log::debug!("splitting node {} into prefix {} and suffix {}", 
-                v2str(v), v2str(&x), v2str(&u));
+            log::debug!(
+                "splitting node {} into prefix {} and suffix {}",
+                v2str(v),
+                v2str(&x),
+                v2str(&u)
+            );
 
             splitted_node_pairs.push((
                 node_id,
@@ -581,7 +588,7 @@ fn collapse(
                 None => {
                     log::debug!("node {} is dedicated shared prefix node", v2str(&x));
                     shared_prefix_node = Some(x);
-                },
+                }
                 Some(w) => {
                     // make all suffixes spring from shared suffix node
                     if !graph.has_edge(w, u) {
@@ -595,17 +602,20 @@ fn collapse(
             };
         } else {
             splitted_node_pairs.push((node_id, node_orient, v_len, *v, None));
-            log::debug!("node {} matches prefix {}", v2str(v), 
+            log::debug!(
+                "node {} matches prefix {}",
+                v2str(v),
                 if prefix_len > 10 {
                     shared_prefix.sequence[..10].to_string() + "..."
                 } else {
                     shared_prefix.sequence.clone()
-                });
+                }
+            );
             match shared_prefix_node {
                 None => {
                     log::debug!("node {} is dedicated shared prefix node", v2str(v));
                     shared_prefix_node = Some(*v);
-                },
+                }
                 Some(w) => {
                     // if node coincides with shared prefix (but is not the dedicated shared prefix
                     // node), then all outgoing edges of this node must be transferred to dedicated
@@ -681,7 +691,7 @@ fn get_shared_prefix(
 
 fn find_and_collapse_walk_preserving_shared_affixes<W: Write>(
     graph: &mut HashGraph,
-    out: &mut io::BufWriter<W>
+    out: &mut io::BufWriter<W>,
 ) -> (DeletedSubGraph, CollapseEventTracker) {
     let mut del_subg = DeletedSubGraph::new();
 
@@ -727,7 +737,7 @@ fn find_and_collapse_walk_preserving_shared_affixes<W: Write>(
                         }
                         let shared_prefix_node =
                             collapse(graph, affix, &mut del_subg, &mut event_tracker);
-                        
+
                         queue.push_back(shared_prefix_node);
                         queue.push_back(shared_prefix_node.flip());
                     }
@@ -848,22 +858,16 @@ fn check_transform(
                 let v = Handle::pack(path[i + 1].0, path[i + 1].1 == Direction::Left);
                 if del_subg.edge_deleted(&u, &v) {
                     panic!(
-                        "edge {}{}{}{} is flagged as deleted new graph",
-                        if u.is_reverse() { '<' } else { '>' },
-                        u.unpack_number(),
-                        if v.is_reverse() { '<' } else { '>' },
-                        v.unpack_number()
+                        "edge {}{} is flagged as deleted new graph",
+                        v2str(&u),
+                        v2str(&v)
                     );
                 }
             }
         } else {
             let v = Handle::pack(path[0].0, path[0].1 == Direction::Left);
             if del_subg.node_deleted(&v) {
-                panic!(
-                    "node {}{} is flagged as deleted new graph",
-                    if v.is_reverse() { '<' } else { '>' },
-                    v.unpack_number()
-                );
+                panic!("node {} is flagged as deleted new graph", v2str(&v));
             }
         }
 
