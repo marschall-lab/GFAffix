@@ -4,6 +4,8 @@
 
 # GFAffix
 
+![GFAffix collapses walk-preserving shared affixes](doc/gfaffix-illustration.png?raw=true "GFAffix collapses walk-preserving shared affixes")
+
 GFAffix identifies walk-preserving shared affixes in variation graphs and collapses them into a non-redundant graph structure.
 
 # Dependencies
