@@ -27,7 +27,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 #[clap(
     version = "0.1.3",
     author = "Daniel Doerr <daniel.doerr@hhu.de>",
-    about = "Discover walk-preserving shared prefixes in multifurcations of a given graph.\n
+    about = "Discover and collapse walk-preserving shared affixes of a given variation graph.\n
     - Do you want log output? Call program with 'RUST_LOG=info gfaffix ...'
     - Log output not informative enough? Try 'RUST_LOG=debug gfaffix ...'"
 )]
@@ -54,7 +54,7 @@ pub struct Command {
     #[clap(
         short = 'c',
         long = "check_transformation",
-        help = "Verifies that the transformed parts of the graphs spell out the identical sequence as in the original graph. Only for debugging purposes"
+        help = "Verifies that the transformed parts of the graphs spell out the identical sequence as in the original graph"
     )]
     pub check_transformation: bool,
 
@@ -1166,7 +1166,8 @@ fn main() -> Result<(), io::Error> {
     //
     graph.paths.clear();
 
-    log::info!("identifying walk-preserving shared prefixes");
+    log::info!("identifying walk-preserving shared affixes");
+    // yes, that's a "prefix", not an affix--because nodes are oriented accordingly
     writeln!(
         out,
         "{}",
