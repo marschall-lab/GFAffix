@@ -1,3 +1,4 @@
+[![Rust Build](https://github.com/marschall-lab/GFAffix/actions/workflows/rust_build.yml/badge.svg)](https://github.com/marschall-lab/GFAffix/actions/workflows/rust_build.yml)
 [![Anaconda-Server Badge](https://anaconda.org/bioconda/gfaffix/badges/installer/conda.svg)](https://conda.anaconda.org/bioconda)
 [![Anaconda-Server Badge](https://anaconda.org/bioconda/gfaffix/badges/platforms.svg)](https://anaconda.org/bioconda/gfaffix)
 [![Anaconda-Server Badge](https://anaconda.org/bioconda/gfaffix/badges/license.svg)](https://anaconda.org/bioconda/gfaffix)
