@@ -1,7 +1,4 @@
-[![Rust Build](https://github.com/marschall-lab/GFAffix/actions/workflows/rust_build.yml/badge.svg)](https://github.com/marschall-lab/GFAffix/actions/workflows/rust_build.yml)
-[![Anaconda-Server Badge](https://anaconda.org/bioconda/gfaffix/badges/installer/conda.svg)](https://conda.anaconda.org/bioconda)
-[![Anaconda-Server Badge](https://anaconda.org/bioconda/gfaffix/badges/platforms.svg)](https://anaconda.org/bioconda/gfaffix)
-[![Anaconda-Server Badge](https://anaconda.org/bioconda/gfaffix/badges/license.svg)](https://anaconda.org/bioconda/gfaffix)
+[![Rust Build](https://github.com/marschall-lab/GFAffix/actions/workflows/rust_build.yml/badge.svg)](https://github.com/marschall-lab/GFAffix/actions/workflows/rust_build.yml) [![Anaconda-Server Badge](https://anaconda.org/bioconda/gfaffix/badges/installer/conda.svg)](https://conda.anaconda.org/bioconda) [![Anaconda-Server Badge](https://anaconda.org/bioconda/gfaffix/badges/platforms.svg)](https://anaconda.org/bioconda/gfaffix) [![Anaconda-Server Badge](https://anaconda.org/bioconda/gfaffix/badges/license.svg)](https://anaconda.org/bioconda/gfaffix)
 
 # GFAffix
 
@@ -11,10 +8,7 @@ GFAffix identifies walk-preserving shared affixes in variation graphs and collap
 
 # Dependencies
 
-`GFAffix` is written in RUST and requires a working RUST build system for
-installation. See
-[https://www.rust-lang.org/tools/install](https://www.rust-lang.org/tools/install)
-for more details. 
+`GFAffix` is written in RUST and requires a working RUST build system for installation. See [https://www.rust-lang.org/tools/install](https://www.rust-lang.org/tools/install) for more details. 
 
 It makes use of the following crates:
 * clap
