@@ -83,16 +83,14 @@ pub fn v2str(v: &Handle) -> String {
     )
 }
 
-fn enumerate_walk_preserving_shared_affixes(
+fn enumerate_branch(
     graph: &HashGraph,
     del_subg: &DeletedSubGraph,
-    v: Handle,
-) -> Result<Vec<AffixSubgraph>, Box<dyn Error>> {
-    let mut res: Vec<AffixSubgraph> = Vec::new();
-
+    v: &Handle,
+) -> FxHashMap<(u8, Vec<Handle>), VecDeque<Handle>> {
     let mut branch: FxHashMap<(u8, Vec<Handle>), VecDeque<Handle>> = FxHashMap::default();
     // traverse multifurcation in the forward direction of the handle
-    for u in graph.neighbors(v, Direction::Right) {
+    for u in graph.neighbors(*v, Direction::Right) {
         if !del_subg.edge_deleted(&v, &u) {
             // get parents of u
             let mut parents: Vec<Handle> = graph
@@ -124,6 +122,18 @@ fn enumerate_walk_preserving_shared_affixes(
             }
         }
     }
+
+    branch
+}
+
+fn enumerate_walk_preserving_shared_affixes(
+    graph: &HashGraph,
+    del_subg: &DeletedSubGraph,
+    v: Handle,
+) -> Result<Vec<AffixSubgraph>, Box<dyn Error>> {
+    let mut res: Vec<AffixSubgraph> = Vec::new();
+
+    let branch = enumerate_branch(graph, del_subg, &v);
 
     for ((c, parents), children) in branch.into_iter() {
         if children.len() > 1 && (c == b'A' || c == b'C' || c == b'G' || c == b'T') {
