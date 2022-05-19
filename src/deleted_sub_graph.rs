@@ -16,12 +16,11 @@ impl DeletedSubGraph {
     }
 
     pub fn edge_deleted(&self, u: &Handle, v: &Handle) -> bool {
-        let mut res: bool;
-        if u.is_reverse() {
-            res = self.nodes.contains(&u.flip());
+        let mut res = if u.is_reverse() {
+            self.nodes.contains(&u.flip())
         } else {
-            res = self.nodes.contains(u);
-        }
+            self.nodes.contains(u)
+        };
         if v.is_reverse() {
             res |= self.nodes.contains(&v.flip());
         } else {

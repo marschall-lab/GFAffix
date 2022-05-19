@@ -20,6 +20,7 @@ use handlegraph::{
     pathhandlegraph::GraphPathNames,
 };
 use quick_csv::Csv;
+use rayon::slice::ParallelSliceMut;
 use regex::Regex;
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -89,22 +90,25 @@ fn enumerate_branch(
     v: &Handle,
 ) -> FxHashMap<(u8, Vec<Handle>), VecDeque<Handle>> {
     let mut branch: FxHashMap<(u8, Vec<Handle>), VecDeque<Handle>> = FxHashMap::default();
+
     // traverse multifurcation in the forward direction of the handle
     for u in graph.neighbors(*v, Direction::Right) {
-        if !del_subg.edge_deleted(&v, &u) {
+        if !del_subg.edge_deleted(v, &u) {
             // get parents of u
             let mut parents: Vec<Handle> = graph
                 .neighbors(u, Direction::Left)
-                .filter(|w| !del_subg.edge_deleted(&w, &u))
+                .filter(|w| !del_subg.edge_deleted(w, &u))
                 .collect();
-            parents.sort();
+
+            parents.par_sort();
+
             // insert child in walk-preserving data structure
             let mut c = graph.base(u, 0).unwrap();
             // make all letters uppercase
             if c >= 90 {
                 c -= 32
             }
-            let children = branch.entry((c, parents)).or_insert(VecDeque::new());
+            let children = branch.entry((c, parents)).or_insert_with(VecDeque::new);
 
             // Sort handles with shared prefix so that reversed ones come first! This is important
             // for the case that two shared prefixes correspond to the same node, one in forward,
@@ -286,7 +290,7 @@ fn collapse(
                     // node
                     let outgoing_edges: Vec<Handle> = graph
                         .neighbors(*v, Direction::Right)
-                        .filter(|u| !del_subg.edge_deleted(&v, u))
+                        .filter(|u| !del_subg.edge_deleted(v, u))
                         .collect();
                     for x in outgoing_edges {
                         if !graph.has_edge(w, x) {
@@ -311,7 +315,7 @@ fn collapse(
 }
 
 fn get_shared_prefix(
-    nodes: &Vec<Handle>,
+    nodes: &[Handle],
     graph: &HashGraph,
 ) -> Result<String, std::string::FromUtf8Error> {
     let mut seq: Vec<u8> = Vec::new();
@@ -596,7 +600,7 @@ fn print_transformations<W: Write>(
     Ok(())
 }
 
-fn spell_walk(graph: &HashGraph, walk: &Vec<(usize, Direction, usize)>) -> Vec<u8> {
+fn spell_walk(graph: &HashGraph, walk: &[(usize, Direction, usize)]) -> Vec<u8> {
     let mut res: Vec<u8> = Vec::new();
 
     let mut prev_v: Option<Handle> = None;
@@ -647,7 +651,7 @@ fn parse_and_transform_paths<W: io::Write>(
                     )
                 })
                 .collect(),
-            &transform,
+            transform,
         );
         writeln!(
             out,
@@ -679,7 +683,7 @@ fn parse_and_transform_paths<W: io::Write>(
 fn parse_and_transform_walks<W: io::Write, R: io::Read>(
     mut data: io::BufReader<R>,
     //    graph: &HashGraph,
-    transform: &FxHashMap<(usize, usize), Vec<(usize, Direction, usize)>>,
+    transform: FxHashMap<(usize, usize), Vec<(usize, Direction, usize)>>,
     orig_node_lens: &FxHashMap<usize, usize>,
     //    del_subg: &DeletedSubGraph,
     out: &mut io::BufWriter<W>,
@@ -689,11 +693,11 @@ fn parse_and_transform_walks<W: io::Write, R: io::Read>(
         .flexible(true)
         .has_header(false);
 
-    for row in reader.into_iter() {
+    for row in reader {
         let row = row.unwrap();
         let mut row_it = row.bytes_columns();
 
-        if &[b'W'] == row_it.next().unwrap() {
+        if [b'W'] == row_it.next().unwrap() {
             let sample_id = str::from_utf8(row_it.next().unwrap())?;
             let hap_idx = str::from_utf8(row_it.next().unwrap())?;
             let seq_id = str::from_utf8(row_it.next().unwrap())?;
@@ -809,7 +813,7 @@ fn main() -> Result<(), io::Error> {
         for path_id in graph.paths.keys() {
             let path_name_vec = graph.get_path_name_vec(*path_id).unwrap();
             let path_name = str::from_utf8(&path_name_vec[..]).unwrap();
-            if re.is_match(&path_name) {
+            if re.is_match(path_name) {
                 let path = graph.get_path(path_id).unwrap();
                 dont_collapse_nodes.extend(path.nodes.iter().map(|&x| {
                     let xid = x.unpack_number() as usize;
@@ -847,7 +851,7 @@ fn main() -> Result<(), io::Error> {
     let (del_subg, mut event_tracker) =
         find_and_collapse_walk_preserving_shared_affixes(&mut graph, &mut out);
 
-    if dont_collapse_nodes.len() > 0 {
+    if !dont_collapse_nodes.is_empty() {
         log::info!("de-collapse no-collapse handles and update transformation table");
         event_tracker.decollapse(&mut graph, dont_collapse_nodes);
     }
@@ -877,25 +881,22 @@ fn main() -> Result<(), io::Error> {
         if let Err(e) = print_active_subgraph(&graph, &del_subg, &mut graph_out) {
             panic!(
                 "unable to write refined graph to {}: {}",
-                params.refined_graph_out.clone(),
-                e
+                params.refined_graph_out, e
             );
         }
         log::info!("transforming paths");
         if let Err(e) = parse_and_transform_paths(&gfa, &node_lens, &transform, &mut graph_out) {
             panic!(
                 "unable to write refined GFA path lines to {}: {}",
-                params.refined_graph_out.clone(),
-                e
+                params.refined_graph_out, e
             );
         };
         log::info!("transforming walks");
         let data = io::BufReader::new(fs::File::open(&params.graph)?);
-        if let Err(e) = parse_and_transform_walks(data, &transform, &node_lens, &mut graph_out) {
+        if let Err(e) = parse_and_transform_walks(data, transform, &node_lens, &mut graph_out) {
             panic!(
                 "unable to parse or write refined GFA walk lines  to {}: {}",
-                params.refined_graph_out.clone(),
-                e
+                params.refined_graph_out, e
             );
         }
     }

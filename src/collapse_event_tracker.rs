@@ -47,8 +47,9 @@ impl CollapseEventTracker {
             if node_id != &prefix_id || node_len != &prefix_len {
                 // record transformation of node, even if none took place (which is the case if node v
                 // equals the dedicated shared prefix node
-                let mut replacement: Vec<(usize, Direction, usize)> = Vec::new();
-                replacement.push((prefix_id, prefix_orient, prefix_len));
+                let mut replacement: Vec<(usize, Direction, usize)> =
+                    vec![(prefix_id, prefix_orient, prefix_len)];
+
                 if let Some((v, vlen)) = suffix {
                     replacement.push((
                         v.unpack_number() as usize,
@@ -140,12 +141,12 @@ impl CollapseEventTracker {
     ) {
         let mut queue = vec![(node_id, node_len)];
 
-        while queue.len() > 0 {
+        while !queue.is_empty() {
             let (vid, vlen) = queue.pop().unwrap();
             if self.transform.contains_key(&(vid, vlen)) {
-                let mut copy_of_vid = vid.clone();
+                let mut copy_of_vid = vid;
                 for (rid, _, rlen) in self.transform.get_mut(&(vid, vlen)).unwrap() {
-                    let key = (rid.clone(), rlen.clone());
+                    let key = (*rid, *rlen);
                     if copies.contains_key(&key) {
                         // replace by a copy
                         let c = copies.get_mut(&key).unwrap().pop();
@@ -158,7 +159,7 @@ impl CollapseEventTracker {
 
                         // if copy is also key of transform table, then record new ID
                         if key == (vid, vlen) {
-                            copy_of_vid = rid.clone()
+                            copy_of_vid = *rid
                         }
                     }
                     // if identical node appears in its expansion sequence, don't expand...
@@ -170,7 +171,7 @@ impl CollapseEventTracker {
                 // if copy is also key of transform table, then update key
                 if copies.contains_key(&(vid, vlen)) && copy_of_vid != vid {
                     let val = self.transform.remove(&(vid, vlen)).unwrap();
-                    self.transform.insert((copy_of_vid, vlen.clone()), val);
+                    self.transform.insert((copy_of_vid, vlen), val);
                 }
             }
         }
@@ -223,7 +224,7 @@ impl CollapseEventTracker {
         let keys = self
             .transform
             .keys()
-            .map(|(xid, xlen)| (xid.clone(), xlen.clone()))
+            .map(|(xid, xlen)| (*xid, *xlen))
             .collect::<Vec<(usize, usize)>>();
         for (vid, vlen) in keys {
             let rule = self.transform.get(&(vid, vlen)).unwrap();
