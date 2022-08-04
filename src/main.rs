@@ -328,25 +328,25 @@ fn get_shared_prefix(
 
         if sequences.iter().any(|other| {
             other.len() <= i
-                || match (other[i], c) {
-                    (b'A', b'A') => false,
-                    (b'A', b'a') => false,
-                    (b'a', b'A') => false,
-                    (b'a', b'a') => false,
-                    (b'C', b'C') => false,
-                    (b'C', b'c') => false,
-                    (b'c', b'C') => false,
-                    (b'c', b'c') => false,
-                    (b'G', b'G') => false,
-                    (b'G', b'g') => false,
-                    (b'g', b'G') => false,
-                    (b'g', b'g') => false,
-                    (b'T', b'T') => false,
-                    (b'T', b't') => false,
-                    (b't', b'T') => false,
-                    (b't', b't') => false,
-                    _ => true,
-                }
+                || !matches!(
+                    (other[i], c),
+                    (b'A', b'A')
+                        | (b'A', b'a')
+                        | (b'a', b'A')
+                        | (b'a', b'a')
+                        | (b'C', b'C')
+                        | (b'C', b'c')
+                        | (b'c', b'C')
+                        | (b'c', b'c')
+                        | (b'G', b'G')
+                        | (b'G', b'g')
+                        | (b'g', b'G')
+                        | (b'g', b'g')
+                        | (b'T', b'T')
+                        | (b'T', b't')
+                        | (b't', b'T')
+                        | (b't', b't')
+                )
         }) {
             break;
         }
@@ -424,7 +424,7 @@ fn find_and_collapse_walk_preserving_shared_affixes<W: Write>(
 }
 
 fn transform_path(
-    path: &Vec<(usize, Direction, usize)>,
+    path: &[(usize, Direction, usize)],
     transform: &FxHashMap<(usize, usize), Vec<(usize, Direction, usize)>>,
 ) -> Vec<(usize, Direction)> {
     let mut res: Vec<(usize, Direction)> = Vec::new();
@@ -650,7 +650,7 @@ fn parse_and_transform_paths<W: io::Write>(
                         *orig_node_lens.get(&sid).unwrap(),
                     )
                 })
-                .collect(),
+                .collect::<Vec<(usize, Direction, usize)>>()[..],
             transform,
         );
         writeln!(
