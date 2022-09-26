@@ -34,7 +34,7 @@ use deleted_sub_graph::*;
 
 #[derive(Parser, Debug)]
 #[clap(
-    version = "0.1.3",
+    version = "0.1.4",
     author = "Daniel Doerr <daniel.doerr@hhu.de>",
     about = "Discover and collapse walk-preserving shared affixes of a given variation graph.\n
     - Do you want log output? Call program with 'RUST_LOG=info gfaffix ...'
@@ -142,7 +142,7 @@ fn enumerate_walk_preserving_shared_affixes(
     for ((c, parents), children) in branch.into_iter() {
         if children.len() > 1 && (c == b'A' || c == b'C' || c == b'G' || c == b'T') {
             let mut children_vec: Vec<Handle> = children.into();
-            let prefix = get_shared_prefix(&children_vec, graph)?;
+            let mut prefix = get_shared_prefix(&children_vec, graph)?;
             log::debug!(
                 "identified shared prefix {} between nodes {} originating from parent(s) {}",
                 if prefix.len() > 10 {
@@ -157,29 +157,35 @@ fn enumerate_walk_preserving_shared_affixes(
                     .join(","),
                 parents.iter().map(v2str).collect::<Vec<String>>().join(",")
             );
-            let full_length: Vec<Handle> = children_vec
-                .clone()
-                .into_iter()
-                .filter(|&x| prefix.len() == graph.node_len(x))
-                .collect();
-            if full_length.len() > 1 {
-                let mut dedup: FxHashSet<Handle> = FxHashSet::default();
-                for v in full_length.iter() {
-                    let u = v.forward();
-                    if dedup.contains(&u) {
+            let mut multiplicity: FxHashMap<Handle, usize> = FxHashMap::default();
+            children_vec.iter().for_each(|v| {
+                multiplicity
+                    .entry(v.forward())
+                    .and_modify(|m| *m += 1)
+                    .or_insert(1);
+            });
+
+            multiplicity.into_iter().for_each(|(v, m)| {
+                if m > 1 {
+                    let l = graph.node_len(v);
+                    if prefix.len() == l {
                         // found palindrome! Let's remove the forward version of it
-                        log::info!("node {} is a palindrome", u.unpack_number());
+                        log::info!("node {} is a palindrome", v.unpack_number());
                         // remember that children_vec is ordered, i.e., reverse followed by forward
                         // nodes? So if the palindromic forward node is removed and replaced by the
                         // last element (that's what swap_remove does), this order is still
                         // maintained
                         children_vec
-                            .swap_remove(children_vec.iter().position(|&w| w == u).unwrap());
-                    } else {
-                        dedup.insert(u);
+                            .swap_remove(children_vec.iter().position(|&u| u == v).unwrap());
+                    } else if prefix.len() > l/2 {
+                        log::info!("prefix and suffix of node {} (length {}) share an overlapping match (overlap: {}bp), clipping overlap", 
+                            v.unpack_number(),
+                            l,
+                            prefix.len() * 2 - l);
+                        prefix.truncate(l/2);
                     }
                 }
-            }
+            });
             if children_vec.len() > 1 {
                 // we are removing children if nodes are palindromes, so if only one node is left,
                 // don't do anything
