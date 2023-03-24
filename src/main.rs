@@ -34,7 +34,7 @@ use deleted_sub_graph::*;
 
 #[derive(Parser, Debug)]
 #[clap(
-    version = "0.1.4",
+    version = "0.1.4b",
     author = "Daniel Doerr <daniel.doerr@hhu.de>",
     about = "Discover and collapse walk-preserving shared affixes of a given variation graph.\n
     - Do you want log output? Call program with 'RUST_LOG=info gfaffix ...'
