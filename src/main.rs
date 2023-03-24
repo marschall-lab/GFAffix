@@ -137,6 +137,13 @@ fn enumerate_walk_preserving_shared_affixes(
 ) -> Result<Vec<AffixSubgraph>, Box<dyn Error>> {
     let mut res: Vec<AffixSubgraph> = Vec::new();
 
+    // we do not allow that the same child is modified in the same iteration by two different
+    // collapses as this will lead to an erroneous reduction; this can happen if both prefix and
+    // suffix of a child share affixes from two different subsets; in order to prevent this, we
+    // maintain a "visited" list of children. If a child appears later in another identified shared
+    // affix, the instance will be simply ignored (and found again at some later iteration, which
+    // is then fine).
+    let mut visited_children: FxHashSet<Handle> = FxHashSet::default();
     let branch = enumerate_branch(graph, del_subg, &v);
 
     for ((c, parents), children) in branch.into_iter() {
@@ -144,7 +151,7 @@ fn enumerate_walk_preserving_shared_affixes(
             let mut children_vec: Vec<Handle> = children.into();
             let mut prefix = get_shared_prefix(&children_vec, graph)?;
             log::debug!(
-                "identified shared prefix {} between nodes {} originating from parent(s) {}",
+                "identified shared affix {} between nodes {} originating from parent(s) {}",
                 if prefix.len() > 10 {
                     prefix[..10].to_string() + "..."
                 } else {
@@ -187,6 +194,9 @@ fn enumerate_walk_preserving_shared_affixes(
                 }
             });
             if children_vec.len() > 1 {
+                if children_vec.iter().all(|x| !visited_children.contains(&x.forward())) {
+                // add children to the list of previously visited children
+                visited_children.extend(children_vec.iter().map(|x| x.forward()));
                 // we are removing children if nodes are palindromes, so if only one node is left,
                 // don't do anything
                 res.push(AffixSubgraph {
@@ -194,6 +204,9 @@ fn enumerate_walk_preserving_shared_affixes(
                     parents: parents.clone(),
                     shared_prefix_nodes: children_vec,
                 });
+                } else {
+                    log::debug!("skip shared affix because it shares children with a previous affix (will be collapsed next time)");
+                }
             }
         }
     }
