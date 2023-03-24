@@ -194,16 +194,19 @@ fn enumerate_walk_preserving_shared_affixes(
                 }
             });
             if children_vec.len() > 1 {
-                if children_vec.iter().all(|x| !visited_children.contains(&x.forward())) {
-                // add children to the list of previously visited children
-                visited_children.extend(children_vec.iter().map(|x| x.forward()));
-                // we are removing children if nodes are palindromes, so if only one node is left,
-                // don't do anything
-                res.push(AffixSubgraph {
-                    sequence: prefix,
-                    parents: parents.clone(),
-                    shared_prefix_nodes: children_vec,
-                });
+                if children_vec
+                    .iter()
+                    .all(|x| !visited_children.contains(&x.forward()))
+                {
+                    // add children to the list of previously visited children
+                    visited_children.extend(children_vec.iter().map(|x| x.forward()));
+                    // we are removing children if nodes are palindromes, so if only one node is left,
+                    // don't do anything
+                    res.push(AffixSubgraph {
+                        sequence: prefix,
+                        parents: parents.clone(),
+                        shared_prefix_nodes: children_vec,
+                    });
                 } else {
                     log::debug!("skip shared affix because it shares children with a previous affix (will be collapsed next time)");
                 }
