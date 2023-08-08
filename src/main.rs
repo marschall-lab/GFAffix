@@ -10,6 +10,7 @@ use std::str::{self, FromStr};
 use clap::Parser;
 use gfa::{
     gfa::{orientation::Orientation, GFA},
+    optfields::OptFields,
     parser::GFAParser,
 };
 use handlegraph::{
@@ -490,7 +491,6 @@ fn print_active_subgraph<W: io::Write>(
     del_subg: &DeletedSubGraph,
     out: &mut io::BufWriter<W>,
 ) -> Result<(), Box<dyn Error>> {
-    writeln!(out, "H\tVN:Z:1.0")?;
     for v in graph.handles() {
         if !del_subg.node_deleted(&v) {
             writeln!(
@@ -656,8 +656,8 @@ fn print<W: io::Write>(affix: &AffixSubgraph, out: &mut io::BufWriter<W>) -> Res
     Ok(())
 }
 
-fn parse_and_transform_paths<W: io::Write>(
-    gfa: &GFA<usize, ()>,
+fn parse_and_transform_paths<W: io::Write, T: OptFields>(
+    gfa: &GFA<usize, T>,
     orig_node_lens: &FxHashMap<usize, usize>,
     transform: &FxHashMap<(usize, usize), Vec<(usize, Direction, usize)>>,
     out: &mut io::BufWriter<W>,
@@ -796,6 +796,20 @@ fn parse_and_transform_walks<W: io::Write, R: io::Read>(
     Ok(())
 }
 
+fn parse_header<R: io::Read>(mut data: io::BufReader<R>) -> Result<Vec<u8>, io::Error> {
+    let mut buf = vec![];
+    while data.read_until(b'\n', &mut buf)? > 0 {
+        if buf[0] == b'H' {
+            // remove trailing new line character
+            if buf.last() == Some(&b'\n') {
+                buf.pop();
+            }
+            break;
+        }
+    }
+    Ok(buf)
+}
+
 fn main() -> Result<(), io::Error> {
     env_logger::init();
 
@@ -905,6 +919,17 @@ fn main() -> Result<(), io::Error> {
     if !params.refined_graph_out.trim().is_empty() {
         log::info!("writing refined graph to {}", params.refined_graph_out);
         let mut graph_out = io::BufWriter::new(fs::File::create(params.refined_graph_out.clone())?);
+        let data = io::BufReader::new(fs::File::open(&params.graph)?);
+        let header = parse_header(data)?;
+        writeln!(
+            graph_out,
+            "{}",
+            if header.is_empty() {
+                "H\tVN:Z:1.1"
+            } else {
+                str::from_utf8(&header[..]).unwrap()
+            }
+        )?;
         if let Err(e) = print_active_subgraph(&graph, &del_subg, &mut graph_out) {
             panic!(
                 "unable to write refined graph to {}: {}",
