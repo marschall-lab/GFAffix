@@ -1,9 +1,10 @@
-use handlegraph::handle::Handle;
+use handlegraph::handle::{Edge, Handle};
 use rustc_hash::FxHashSet;
 
 #[derive(Clone, Debug)]
 pub struct DeletedSubGraph {
     pub nodes: FxHashSet<Handle>,
+    pub edges: FxHashSet<Edge>,
 }
 
 impl DeletedSubGraph {
@@ -15,8 +16,13 @@ impl DeletedSubGraph {
         }
     }
 
+    pub fn add_edge(&mut self, e: Edge) -> bool {
+        self.edges.insert(e)
+    }
+
     pub fn edge_deleted(&self, u: &Handle, v: &Handle) -> bool {
-        let mut res = if u.is_reverse() {
+        let mut res = self.edges.contains(&Edge(*u, *v));
+        res |= if u.is_reverse() {
             self.nodes.contains(&u.flip())
         } else {
             self.nodes.contains(u)
@@ -40,6 +46,7 @@ impl DeletedSubGraph {
     pub fn new() -> Self {
         DeletedSubGraph {
             nodes: FxHashSet::default(),
+            edges: FxHashSet::default(),
         }
     }
 }

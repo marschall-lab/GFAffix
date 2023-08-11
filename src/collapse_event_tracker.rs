@@ -219,7 +219,11 @@ impl CollapseEventTracker {
         res
     }
 
-    pub fn decollapse(&mut self, graph: &mut HashGraph, nodes: FxHashSet<(usize, usize)>) {
+    pub fn decollapse(
+        &mut self,
+        graph: &mut HashGraph,
+        nodes: FxHashSet<(usize, usize)>,
+    ) -> Vec<usize> {
         // first of all, remove unnecessary transformation rules
         let keys = self
             .transform
@@ -296,10 +300,18 @@ impl CollapseEventTracker {
             }
         }
 
+        // collect copies for return
+        let mut res = Vec::new();
+        for v in copies.values() {
+            res.extend(v.iter().map(|x| x.unpack_number() as usize));
+        }
+
         // update transformation table
         for (vid, vlen) in nodes.iter() {
             self.deduplicate_transform(*vid, *vlen, &mut copies);
         }
+
+        res
     }
 
     pub fn new() -> Self {

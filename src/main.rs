@@ -4,6 +4,7 @@ use std::error::Error;
 use std::fs;
 use std::io;
 use std::io::prelude::*;
+use std::iter::{repeat, FromIterator};
 use std::str::{self, FromStr};
 
 /* crate use */
@@ -810,6 +811,129 @@ fn parse_header<R: io::Read>(mut data: io::BufReader<R>) -> Result<Vec<u8>, io::
     Ok(buf)
 }
 
+fn count_copies(
+    visited_nodes: &mut FxHashMap<usize, usize>,
+    visited_edges: &mut FxHashMap<Edge, usize>,
+    path: &Vec<(usize, Direction)>,
+) {
+    for i in 1..path.len() {
+        let (u, ou) = path[i - 1];
+        let (v, ov) = path[i];
+        visited_nodes.get_mut(&u).map(|x| *x += 1);
+
+        let e = Edge(
+            Handle::pack(u, ou == Direction::Left),
+            Handle::pack(v, ov == Direction::Left),
+        );
+        visited_edges.get_mut(&e).map(|x| *x += 1);
+    }
+    if let Some((v, _)) = path.last() {
+        visited_nodes.get_mut(&v).map(|x| *x += 1);
+    }
+}
+
+fn remove_unused_copies<R: io::Read, T: OptFields>(
+    copies: &Vec<usize>,
+    graph: &HashGraph,
+    mut data: io::BufReader<R>,
+    gfa: &GFA<usize, T>,
+    orig_node_lens: &FxHashMap<usize, usize>,
+    transform: &FxHashMap<(usize, usize), Vec<(usize, Direction, usize)>>,
+    del_subg: &mut DeletedSubGraph,
+) {
+    // construct hashmap for counting the visits of edges introduced by the duplication process
+    let mut visited_edges = FxHashMap::default();
+    for i in copies.iter() {
+        let v = Handle::pack(*i, false);
+        for w in graph.neighbors(v, Direction::Left) {
+            visited_edges.insert(Edge(w, v), 0);
+        }
+        for w in graph.neighbors(v, Direction::Right) {
+            visited_edges.insert(Edge(v, w), 0);
+        }
+    }
+
+    // construct hashmap to count visits to nodes
+    let mut visited_nodes: FxHashMap<usize, usize> =
+        FxHashMap::from_iter(copies.iter().cloned().zip(repeat(0)));
+
+    for path in gfa.paths.iter() {
+        let tpath = transform_path(
+            &path
+                .iter()
+                .map(|(sid, o)| {
+                    (
+                        sid,
+                        match o {
+                            Orientation::Forward => Direction::Right,
+                            Orientation::Backward => Direction::Left,
+                        },
+                        *orig_node_lens.get(&sid).unwrap(),
+                    )
+                })
+                .collect::<Vec<(usize, Direction, usize)>>()[..],
+            transform,
+        );
+        count_copies(&mut visited_nodes, &mut visited_edges, &tpath);
+    }
+
+    let reader = Csv::from_reader(&mut data)
+        .delimiter(b'\t')
+        .flexible(true)
+        .has_header(false);
+
+    for row in reader {
+        let row = row.unwrap();
+        let mut row_it = row.bytes_columns();
+
+        if [b'W'] == row_it.next().unwrap_or(&[b'$']) {
+            let walk_data = row_it.nth(6).unwrap();
+            let mut walk: Vec<(usize, Direction, usize)> = Vec::new();
+
+            let mut cur_el: Vec<u8> = Vec::new();
+            for c in walk_data {
+                if (c == &b'>' || c == &b'<') && !cur_el.is_empty() {
+                    let sid = usize::from_str(str::from_utf8(&cur_el[1..]).unwrap()).unwrap();
+                    let o = match cur_el[0] {
+                        b'>' => Direction::Right,
+                        b'<' => Direction::Left,
+                        _ => panic!("unknown orientation '{}' of segment {}", cur_el[0], sid),
+                    };
+                    walk.push((sid, o, *orig_node_lens.get(&sid).unwrap()));
+                    cur_el.clear();
+                }
+                cur_el.push(*c);
+            }
+
+            if !cur_el.is_empty() {
+                let sid = usize::from_str(str::from_utf8(&cur_el[1..]).unwrap()).unwrap();
+                let o = match cur_el[0] {
+                    b'>' => Direction::Right,
+                    b'<' => Direction::Left,
+                    _ => panic!("unknown orientation '{}' of segment {}", cur_el[0], sid),
+                };
+                walk.push((sid, o, *orig_node_lens.get(&sid).unwrap()));
+            }
+            let tpath = transform_path(&walk, &transform);
+            count_copies(&mut visited_nodes, &mut visited_edges, &tpath);
+        }
+    }
+
+    for (i, c) in visited_nodes.iter() {
+        if *c == 0 {
+            log::debug!("Removing unused duplicate node {}", i);
+            del_subg.add_node(Handle::pack(*i, false));
+        }
+    }
+
+    for (Edge(u, v), c) in visited_edges.iter() {
+        if *c == 0 {
+            log::debug!("Removing unused duplicate edge {}{}", v2str(u), v2str(v));
+            del_subg.add_edge(Edge(*u, *v));
+        }
+    }
+}
+
 fn main() -> Result<(), io::Error> {
     env_logger::init();
 
@@ -889,12 +1013,23 @@ fn main() -> Result<(), io::Error> {
         .join("\t")
     )?;
 
-    let (del_subg, mut event_tracker) =
+    let (mut del_subg, mut event_tracker) =
         find_and_collapse_walk_preserving_shared_affixes(&mut graph, &mut out);
 
     if !dont_collapse_nodes.is_empty() {
         log::info!("de-collapse no-collapse handles and update transformation table");
-        event_tracker.decollapse(&mut graph, dont_collapse_nodes);
+        let copies = event_tracker.decollapse(&mut graph, dont_collapse_nodes);
+
+        let data = io::BufReader::new(fs::File::open(&params.graph)?);
+        remove_unused_copies(
+            &copies,
+            &graph,
+            data,
+            &gfa,
+            &node_lens,
+            &event_tracker.get_expanded_transformation(),
+            &mut del_subg,
+        );
     }
 
     log::info!("expand transformation table");
