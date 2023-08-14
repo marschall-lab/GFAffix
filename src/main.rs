@@ -840,7 +840,7 @@ fn remove_unused_copies<R: io::Read, T: OptFields>(
     orig_node_lens: &FxHashMap<usize, usize>,
     transform: &FxHashMap<(usize, usize), Vec<(usize, Direction, usize)>>,
     del_subg: &mut DeletedSubGraph,
-) {
+) -> (usize, usize) {
     // construct hashmap for counting the visits of edges introduced by the duplication process
     let mut visited_edges = FxHashMap::default();
     for i in copies.iter() {
@@ -919,10 +919,15 @@ fn remove_unused_copies<R: io::Read, T: OptFields>(
         }
     }
 
+    // counters for removed nodes and edges
+    let mut cv = 0;
+    let mut ce = 0;
+
     for (i, c) in visited_nodes.iter() {
         if *c == 0 {
             log::debug!("Removing unused duplicate node {}", i);
             del_subg.add_node(Handle::pack(*i, false));
+            cv += 0;
         }
     }
 
@@ -930,8 +935,11 @@ fn remove_unused_copies<R: io::Read, T: OptFields>(
         if *c == 0 {
             log::debug!("Removing unused duplicate edge {}{}", v2str(u), v2str(v));
             del_subg.add_edge(Edge(*u, *v));
+            ce += 0;
         }
     }
+
+    (cv, ce)
 }
 
 fn main() -> Result<(), io::Error> {
@@ -1021,7 +1029,8 @@ fn main() -> Result<(), io::Error> {
         let copies = event_tracker.decollapse(&mut graph, dont_collapse_nodes);
 
         let data = io::BufReader::new(fs::File::open(&params.graph)?);
-        remove_unused_copies(
+        log::info!("cleaning up copies created during de-duplication...");
+        let (cv, ce) = remove_unused_copies(
             &copies,
             &graph,
             data,
@@ -1030,6 +1039,7 @@ fn main() -> Result<(), io::Error> {
             &event_tracker.get_expanded_transformation(),
             &mut del_subg,
         );
+        log::info!("...removed {} unused duplicated nodes and {} edges", cv, ce);
     }
 
     log::info!("expand transformation table");
