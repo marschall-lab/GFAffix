@@ -887,7 +887,7 @@ fn remove_unused_copies<R: io::Read, T: OptFields>(
         let mut row_it = row.bytes_columns();
 
         if [b'W'] == row_it.next().unwrap_or(&[b'$']) {
-            let walk_data = row_it.nth(6).unwrap();
+            let walk_data = row_it.nth(5).unwrap();
             let mut walk: Vec<(usize, Direction, usize)> = Vec::new();
 
             let mut cur_el: Vec<u8> = Vec::new();
