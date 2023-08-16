@@ -282,7 +282,7 @@ impl CollapseEventTracker {
                         u.unpack_number(),
                         v2str(&w)
                     );
-                    graph.create_edge(Edge(u.flip(), w.flip()));
+                    graph.create_edge(Edge::edge_handle(u.flip(), w.flip()));
                 }
                 for w in graph
                     .neighbors(v, Direction::Right)
@@ -293,7 +293,7 @@ impl CollapseEventTracker {
                         u.unpack_number(),
                         v2str(&w)
                     );
-                    graph.create_edge(Edge(u, w));
+                    graph.create_edge(Edge::edge_handle(u, w));
                 }
                 copies.get_mut(&(*vid, *vlen)).unwrap().push(u);
                 *occ -= 1

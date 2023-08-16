@@ -929,7 +929,9 @@ fn remove_unused_copies<R: io::Read, T: OptFields>(
     for (Edge(u, v), c) in visited_edges.iter() {
         if *c == 0 {
             log::debug!("Removing unused duplicate edge {}{}", v2str(u), v2str(v));
-            del_subg.add_edge(Edge::edge_handle(*u, *v));
+            // we don't need Edge::edge_handle here, because edges in visited_edges are already
+            // canonical
+            del_subg.add_edge(Edge(*u, *v));
             ce += 1;
         }
     }
