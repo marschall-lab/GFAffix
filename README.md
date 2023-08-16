@@ -30,15 +30,30 @@ Make sure you have [conda](https://conda.io) installed!
 conda install -c bioconda gfaffix
 ```
 
-### From binary release (linux x86\_64)
+### From binary release
+
+#### Linux x86\_64
 
 ```
 
-wget --no-check-certificate -c https://github.com/marschall-lab/GFAffix/releases/download/0.1.4/GFAffix-0.1.4_linux_x86_64.tar.gz 
-tar -xzvf GFAffix-0.1.4_linux_x86_64.tar.gz 
+wget --no-check-certificate -c https://github.com/marschall-lab/GFAffix/releases/download/0.1.5/GFAffix-0.1.5_linux_x86_64.tar.gz 
+tar -xzvf GFAffix-0.1.5_linux_x86_64.tar.gz 
 
 # you are ready to go! 
-./GFAffix-0.1.4/gfaffix
+./GFAffix-0.1.5/gfaffix
+
+
+```
+
+#### MacOS X arm64
+
+```
+
+wget --no-check-certificate -c https://github.com/marschall-lab/GFAffix/releases/download/0.1.5/GFAffix-0.1.5_macosx_arm64.tar.gz 
+tar -xzvf GFAffix-0.1.5_macosx_arm64.tar.gz 
+
+# you are ready to go! 
+./GFAffix-0.1.5/gfaffix
 
 
 ```
@@ -56,7 +71,7 @@ cargo build --manifest-path GFAffix/Cargo.toml --release
 
 ```
 $ gfaffix --help
-gfaffix 0.1.4b
+gfaffix 0.1.5
 Daniel Doerr <daniel.doerr@hhu.de>
 Discover walk-preserving shared prefixes in multifurcations of a given graph.
 

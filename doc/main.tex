@@ -23,6 +23,11 @@
 
 \maketitle
 
+\begin{abstract}
+    We show that collapsing walk-preserving shared prefixes does not affect the set of variants spelled in variation graphs.
+\end{abstract} 
+
+A popular data structure in pangenomics are variation graphs~\cite{hprc,mc,odgi}. 
 Let $G = (V, E)$ be a variation graph with node set $V$ representing the set of
 \emph{oriented} nodes of $G$. Each node $v \in V$ is associated with a sequence
 $\seq(v)$ representing a DNA molecule. For any given sequence $v \in V$ there exists
@@ -97,4 +102,8 @@ sequences $\seq(v)$ and $\seq(u)$. Further, we denote by $\parent(v) := \{u
 %    there exists no two paths $p = (s, \ldots, S)$ and $p' = (s, \ldots, S)$
 %    with $p \neq p'$ and 
 %\end{conecture}
+
+\bibliographystyle{acm}
+\bibliography{main}
+
 \end{document}
