@@ -284,7 +284,7 @@ fn collapse(
                 Some(w) => {
                     // make all suffixes spring from shared suffix node
                     if !graph.has_edge(w, u) {
-                        graph.create_edge(Edge(w, u));
+                        graph.create_edge(Edge::edge_handle(w, u));
                         log::debug!("create edge {}{}", v2str(&w), v2str(&u));
                         // mark redundant node as deleted
                         log::debug!("flag {} as deleted", v2str(&x));
@@ -316,14 +316,9 @@ fn collapse(
                         .neighbors(*v, Direction::Right)
                         .filter(|u| !del_subg.edge_deleted(v, u))
                         .collect();
-                    for mut x in outgoing_edges {
-                        if &x == v {
-                            x = w;
-                        } else if x == v.flip() {
-                            x = w.flip()
-                        }
+                    for x in outgoing_edges {
                         if !graph.has_edge(w, x) {
-                            graph.create_edge(Edge(w, x));
+                            graph.create_edge(Edge::edge_handle(w, x));
                             log::debug!("create edge {}{}", v2str(&w), v2str(&x));
                         }
                     }
@@ -821,7 +816,7 @@ fn count_copies(
         let (v, ov) = path[i];
         visited_nodes.get_mut(&u).map(|x| *x += 1);
 
-        let e = Edge(
+        let e = Edge::edge_handle(
             Handle::pack(u, ou == Direction::Left),
             Handle::pack(v, ov == Direction::Left),
         );
@@ -846,10 +841,10 @@ fn remove_unused_copies<R: io::Read, T: OptFields>(
     for i in copies.iter() {
         let v = Handle::pack(*i, false);
         for w in graph.neighbors(v, Direction::Left) {
-            visited_edges.insert(Edge(w, v), 0);
+            visited_edges.insert(Edge::edge_handle(w, v), 0);
         }
         for w in graph.neighbors(v, Direction::Right) {
-            visited_edges.insert(Edge(v, w), 0);
+            visited_edges.insert(Edge::edge_handle(v, w), 0);
         }
     }
 
@@ -927,15 +922,15 @@ fn remove_unused_copies<R: io::Read, T: OptFields>(
         if *c == 0 {
             log::debug!("Removing unused duplicate node {}", i);
             del_subg.add_node(Handle::pack(*i, false));
-            cv += 0;
+            cv += 1;
         }
     }
 
     for (Edge(u, v), c) in visited_edges.iter() {
         if *c == 0 {
             log::debug!("Removing unused duplicate edge {}{}", v2str(u), v2str(v));
-            del_subg.add_edge(Edge(*u, *v));
-            ce += 0;
+            del_subg.add_edge(Edge::edge_handle(*u, *v));
+            ce += 1;
         }
     }
 
