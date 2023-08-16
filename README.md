@@ -40,7 +40,7 @@ wget --no-check-certificate -c https://github.com/marschall-lab/GFAffix/releases
 tar -xzvf GFAffix-0.1.5_linux_x86_64.tar.gz 
 
 # you are ready to go! 
-./GFAffix-0.1.5/gfaffix
+./GFAffix-0.1.5_linux_x86_64/gfaffix
 
 
 ```
@@ -49,11 +49,11 @@ tar -xzvf GFAffix-0.1.5_linux_x86_64.tar.gz
 
 ```
 
-wget --no-check-certificate -c https://github.com/marschall-lab/GFAffix/releases/download/0.1.5/GFAffix-0.1.5_macosx_arm64.tar.gz 
-tar -xzvf GFAffix-0.1.5_macosx_arm64.tar.gz 
+wget --no-check-certificate -c https://github.com/marschall-lab/GFAffix/releases/download/0.1.5/GFAffix-0.1.5_macos_x_arm64.tar.gz 
+tar -xzvf GFAffix-0.1.5_macos_x_arm64.tar.gz 
 
 # you are ready to go! 
-./GFAffix-0.1.5/gfaffix
+./GFAffix-0.1.5_macos_x_arm64/gfaffix
 
 
 ```
