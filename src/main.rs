@@ -316,7 +316,12 @@ fn collapse(
                         .neighbors(*v, Direction::Right)
                         .filter(|u| !del_subg.edge_deleted(v, u))
                         .collect();
-                    for x in outgoing_edges {
+                    for mut x in outgoing_edges {
+                        if &x == v {
+                            x = w;
+                        } else if x == v.flip() {
+                            x = w.flip()
+                        } 
                         if !graph.has_edge(w, x) {
                             graph.create_edge(Edge::edge_handle(w, x));
                             log::debug!("create edge {}{}", v2str(&w), v2str(&x));
