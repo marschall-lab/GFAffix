@@ -321,7 +321,7 @@ fn collapse(
                             x = w;
                         } else if x == v.flip() {
                             x = w.flip()
-                        } 
+                        }
                         if !graph.has_edge(w, x) {
                             graph.create_edge(Edge::edge_handle(w, x));
                             log::debug!("create edge {}{}", v2str(&w), v2str(&x));
