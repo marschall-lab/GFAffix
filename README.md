@@ -36,11 +36,11 @@ conda install -c bioconda gfaffix
 
 ```
 
-wget --no-check-certificate -c https://github.com/marschall-lab/GFAffix/releases/download/0.1.5/GFAffix-0.1.5_linux_x86_64.tar.gz 
-tar -xzvf GFAffix-0.1.5_linux_x86_64.tar.gz 
+wget --no-check-certificate -c https://github.com/marschall-lab/GFAffix/releases/download/0.1.5/GFAffix-0.1.5a_linux_x86_64.tar.gz 
+tar -xzvf GFAffix-0.1.5a_linux_x86_64.tar.gz 
 
 # you are ready to go! 
-./GFAffix-0.1.5_linux_x86_64/gfaffix
+./GFAffix-0.1.5a_linux_x86_64/gfaffix
 
 
 ```
@@ -49,11 +49,11 @@ tar -xzvf GFAffix-0.1.5_linux_x86_64.tar.gz
 
 ```
 
-wget --no-check-certificate -c https://github.com/marschall-lab/GFAffix/releases/download/0.1.5/GFAffix-0.1.5_macos_x_arm64.tar.gz 
-tar -xzvf GFAffix-0.1.5_macos_x_arm64.tar.gz 
+wget --no-check-certificate -c https://github.com/marschall-lab/GFAffix/releases/download/0.1.5/GFAffix-0.1.5a_macos_x_arm64.tar.gz 
+tar -xzvf GFAffix-0.1.5a_macos_x_arm64.tar.gz 
 
 # you are ready to go! 
-./GFAffix-0.1.5_macos_x_arm64/gfaffix
+./GFAffix-0.1.5a_macos_x_arm64/gfaffix
 
 
 ```
@@ -71,7 +71,7 @@ cargo build --manifest-path GFAffix/Cargo.toml --release
 
 ```
 $ gfaffix --help
-gfaffix 0.1.5
+gfaffix 0.1.5a
 Daniel Doerr <daniel.doerr@hhu.de>
 Discover walk-preserving shared prefixes in multifurcations of a given graph.
 
