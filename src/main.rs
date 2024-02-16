@@ -1094,7 +1094,7 @@ fn main() -> Result<(), io::Error> {
         let data = io::BufReader::new(fs::File::open(&params.graph)?);
         if let Err(e) = parse_and_transform_walks(data, transform, &node_lens, &mut graph_out) {
             panic!(
-                "unable to parse or write refined GFA walk lines  to {}: {}",
+                "unable to parse or write refined GFA walk lines to {}: {}",
                 params.refined_graph_out, e
             );
         }
