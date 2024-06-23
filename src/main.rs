@@ -807,11 +807,11 @@ fn parse_and_transform_paths<W: io::Write, T: OptFields>(
             transform,
         );
 
-        if walks.contains_key(&path.path_name) {
+        if walks.contains_key(&path.path_name[..]) {
             writeln!(
                 out,
                 "W\t{}\t{}",
-                str::from_utf8(walks.get(&path.path_name).unwrap())?,
+                str::from_utf8(walks.get(&path.path_name[..]).unwrap())?,
                 tpath
                     .iter()
                     .map(|(sid, o)| format!(

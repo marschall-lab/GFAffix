@@ -205,25 +205,25 @@ pub fn transform_walks(line: Vec<u8>, walk_map: &mut FxHashMap<Vec<u8>, Vec<u8>>
             orig.push(b'\t');
             orig.extend_from_slice(&seq_end[..]);
 
-            let mut transformed: Vec<u8> = Vec::new();
-            transformed.extend_from_slice(&sample_id[..]);
-            transformed.push(b'#');
-            transformed.extend_from_slice(&haplo_id[..]);
-            transformed.push(b'#');
-            transformed.extend_from_slice(&seq_id[..]);
-            transformed.push(b':');
-            transformed.extend_from_slice(&seq_start[..]);
-            transformed.push(b'-');
-            transformed.extend_from_slice(&seq_end[..]);
+            let mut path_name : Vec<u8> = Vec::new();
+            path_name.extend_from_slice(&sample_id[..]);
+            path_name.push(b'#');
+            path_name.extend_from_slice(&haplo_id[..]);
+            path_name.push(b'#');
+            path_name.extend_from_slice(&seq_id[..]);
+            path_name.push(b':');
+            path_name.extend_from_slice(&seq_start[..]);
+            path_name.push(b'-');
+            path_name.extend_from_slice(&seq_end[..]);
 
             // create an ID that is unique to this particular walk, *just in case* a path with the
             // same signature already exists (which is highly unlikely, but hey, let's be sure!
-            transformed.push(b'$');
+            path_name.push(b'$');
             let mut hasher = DefaultHasher::new();
             hasher.write(&orig);
-            transformed.extend_from_slice(hasher.finish().to_string().as_bytes());
+            path_name.extend_from_slice(hasher.finish().to_string().as_bytes());
 
-            walk_map.insert(transformed.clone(), orig);
+            walk_map.insert(path_name.clone(), orig);
 
             let walk = it
                 .next()
@@ -252,6 +252,10 @@ pub fn transform_walks(line: Vec<u8>, walk_map: &mut FxHashMap<Vec<u8>, Vec<u8>>
                 // remove last semicolon
                 path.pop();
             }
+            let mut transformed: Vec<u8> = Vec::new();
+            transformed.push(b'P');
+            transformed.push(b'\t');
+            transformed.append(&mut path_name);
             transformed.push(b'\t');
             transformed.append(&mut path);
             transformed.push(b'\t');
