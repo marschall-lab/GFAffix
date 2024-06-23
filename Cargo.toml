@@ -8,12 +8,12 @@ edition = "2018"
 
 [dependencies]
 clap        = {version = "4.3", features = [ "derive" ] }
-rustc-hash  = "1"
-regex       = "1"
+gfa         = "0.10.1"
 handlegraph = "0.7.0-alpha.9"
-gfa         = "0.10"
-quick-csv   = "0.1.6"
+indexmap    = "2.2.6"
 rayon       = "1"
+regex       = "1"
+rustc-hash  = "1"
 
 # Logging and error management
 log        = "0.4"
