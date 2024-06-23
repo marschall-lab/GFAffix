@@ -21,10 +21,10 @@ use handlegraph::{
     mutablehandlegraph::{AdditiveHandleGraph, MutableHandles},
     pathhandlegraph::GraphPathNames,
 };
-use quick_csv::Csv;
-use rayon::slice::ParallelSliceMut;
+use rayon::prelude::*;
 use regex::Regex;
 use rustc_hash::{FxHashMap, FxHashSet};
+use std::sync::{Arc, Mutex};
 
 /* mod declaration */
 mod collapse_event_tracker;
@@ -33,6 +33,10 @@ mod affix_sub_graph;
 use affix_sub_graph::*;
 mod deleted_sub_graph;
 use deleted_sub_graph::*;
+mod walk_transform;
+use walk_transform::*;
+mod decomposition;
+use decomposition::*;
 
 #[derive(Parser, Debug)]
 #[clap(
@@ -76,6 +80,14 @@ pub struct Command {
         default_value = " "
     )]
     pub no_collapse_path: String,
+
+    #[clap(
+        short = 'p',
+        long,
+        help = "Run in parallel on N threads",
+        default_value = "1"
+    )]
+    threads: usize,
 }
 
 pub fn v2str(v: &Handle) -> String {
@@ -83,6 +95,18 @@ pub fn v2str(v: &Handle) -> String {
         "{}{}",
         if v.is_reverse() { '<' } else { '>' },
         v.unpack_number()
+    )
+}
+
+pub fn v2tuple(graph: &HashGraph, v: &Handle) -> (usize, Direction, usize) {
+    (
+        v.unpack_number() as usize,
+        if v.is_reverse() {
+            Direction::Left
+        } else {
+            Direction::Right
+        },
+        graph.node_len(*v),
     )
 }
 
@@ -225,6 +249,7 @@ fn collapse(
     del_subg: &mut DeletedSubGraph,
     event_tracker: &mut CollapseEventTracker,
 ) -> Handle {
+    // let's commence the collapse!
     let prefix_len = shared_prefix.sequence.len();
 
     // update graph in two passes:
@@ -243,6 +268,18 @@ fn collapse(
 
     let mut shared_prefix_node: Option<Handle> = None;
 
+    // edges need to be stored only for the case where the set contains a don't-collapse-node and
+    // any (incl. the d-c-n) is blunt, i.e., has the same length as the shared prefix. All other
+    // "non-blunt" edges can be trivially restored, it's just when blunt nodes collapse that the
+    // original incident edges need to be restored. In other words, and *THIS IS IMPORTANT*, the
+    // retained edge set is not complete (it does not contain the non-blunt edges), but only covers
+    // the essential part of the graph adjacencies that must be restored
+
+    let mut has_blunt_nodes = false;
+    let mut original_edges: Vec<((usize, Direction, usize), Vec<(usize, Direction, usize)>)> =
+        Vec::new();
+    let mut n_dont_collapse_nodes = 0;
+
     for v in shared_prefix.shared_prefix_nodes.iter() {
         let v_len = graph.node_len(*v);
         let node_id = v.unpack_number() as usize;
@@ -251,6 +288,14 @@ fn collapse(
         } else {
             Direction::Right
         };
+
+        // count don't collapse nodes
+        let isDontCollapse = event_tracker
+            .dont_collapse_nodes
+            .contains(&(node_id, v_len));
+        if isDontCollapse {
+            n_dont_collapse_nodes += 1;
+        }
         if v_len > prefix_len {
             // x corresponds to the shared prefix,
             let (x, u) = if v.is_reverse() {
@@ -267,6 +312,17 @@ fn collapse(
                 v2str(&x),
                 v2str(&u)
             );
+            //            if isDontCollapse {
+            //                log::debug!(
+            //                    "original node is a don't collapse node, adding new nodes {} and {} to don't collapse collection",
+            //                    v2str(&x),
+            //                    v2str(&u)
+            //                );
+            //                let (xid, _, xlen) = v2tuple(graph, &x);
+            //                event_tracker.dont_collapse_nodes.insert((xid, xlen));
+            //                let (uid, _, ulen) = v2tuple(graph, &u);
+            //                event_tracker.dont_collapse_nodes.insert((uid, ulen));
+            //            }
 
             splitted_node_pairs.push((
                 node_id,
@@ -282,7 +338,7 @@ fn collapse(
                     shared_prefix_node = Some(x);
                 }
                 Some(w) => {
-                    // make all suffixes spring from shared suffix node
+                    // make all suffixes adjacent to shared suffix node
                     if !graph.has_edge(w, u) {
                         graph.create_edge(Edge::edge_handle(w, u));
                         log::debug!("create edge {}{}", v2str(&w), v2str(&u));
@@ -292,6 +348,11 @@ fn collapse(
                     }
                 }
             };
+
+            // to properly disentagle decollapsed non-collapsible nodes in presence of blunt nodes,
+            // non-blunt nodes (suffix is non-empty) need to be recorded
+            let spn = shared_prefix_node.unwrap();
+            original_edges.push((v2tuple(graph, &spn), vec![v2tuple(graph, &u)]));
         } else {
             splitted_node_pairs.push((node_id, node_orient, v_len, *v, None));
             log::debug!(
@@ -303,6 +364,16 @@ fn collapse(
                     shared_prefix.sequence.clone()
                 }
             );
+            has_blunt_nodes = true;
+            original_edges.push((
+                (node_id, node_orient, v_len),
+                graph
+                    .neighbors(*v, Direction::Right)
+                    .filter(|u| !del_subg.edge_deleted(v, u))
+                    .map(|u| v2tuple(graph, &u))
+                    .collect(),
+            ));
+
             match shared_prefix_node {
                 None => {
                     log::debug!("node {} is dedicated shared prefix node", v2str(v));
@@ -335,12 +406,24 @@ fn collapse(
         }
     }
 
-    event_tracker.report(
-        shared_prefix_node.unwrap(),
-        graph.node_len(shared_prefix_node.unwrap()),
-        &splitted_node_pairs,
-    );
-    shared_prefix_node.unwrap()
+    if n_dont_collapse_nodes >= 2 {
+        //
+        // The neighborhood of nodes that are not supposed to be collapsed needs to be saved, so
+        // that we can restore them later on. You might ask yourself--then why do we collapse those
+        // nodes in the first place? Well, turns out that there are situations where the
+        // de-collapsed graph is more condensed than a not-at-all-collapsed graph, because of
+        // subsequent collapses of decollapsible nodes.
+        //
+        // This neighborhood needs only be recovered if blunt nodes are involved
+        if !has_blunt_nodes {
+            original_edges.clear();
+        }
+        event_tracker.retain_dont_collapse_edges(original_edges);
+    }
+
+    let spn = shared_prefix_node.unwrap();
+    event_tracker.report(spn, prefix_len, &splitted_node_pairs);
+    spn
 }
 
 fn get_shared_prefix(
@@ -386,59 +469,79 @@ fn get_shared_prefix(
     String::from_utf8(seq)
 }
 
-fn find_and_collapse_walk_preserving_shared_affixes<W: Write>(
+fn find_walk_preserving_shared_affixes(graph: &HashGraph, del_subg: &DeletedSubGraph, nodes: Vec<Handle>) -> Vec<AffixSubgraph> {
+    nodes.par_iter().filter_map(|v| {
+        if !del_subg.node_deleted(v) {
+            Some(enumerate_walk_preserving_shared_affixes(graph, &del_subg, *v).unwrap())
+        } else {
+            None
+        }
+    }).flatten().collect()
+}
+
+fn find_affected_nodes(graph: &HashGraph, del_subg: &DeletedSubGraph, v: Handle) -> Vec<Handle> {
+    let mut queue = vec![v];
+
+    let mut res = vec![v, v.flip()];
+
+    for _ in 0..2 {
+        res.extend(queue.iter().cloned().filter_map(|v| {
+            if !del_subg.node_deleted(&v) {
+                Some(graph.neighbors(v, Direction::Right).filter(move |u| !del_subg.edge_deleted(&v, u) && !del_subg.node_deleted(u)).chain(graph.neighbors(v, Direction::Left).filter_map(move |u| if !del_subg.edge_deleted(&u, &v) && !del_subg.node_deleted(&u) { Some(u.flip()) } else { None}))) 
+            } else {
+                None
+            }
+        }).flatten());
+        let new_queue : Vec<Handle> = queue.into_iter().map(|v| graph.neighbors(v, Direction::Right).filter(move |u| !del_subg.edge_deleted(&v, u) && !del_subg.node_deleted(u))).flatten().collect();
+        queue = new_queue;
+    }
+
+    res
+}
+
+fn find_and_collapse_walk_preserving_shared_affixes<'a>(
     graph: &mut HashGraph,
-    out: &mut io::BufWriter<W>,
-) -> (DeletedSubGraph, CollapseEventTracker) {
+    dont_collapse_nodes: &'a FxHashSet<(usize, usize)>,
+) -> (Vec<AffixSubgraph>, DeletedSubGraph, CollapseEventTracker<'a>) {
+
+    let mut affixes = Vec::new();
     let mut del_subg = DeletedSubGraph::new();
 
-    let mut event_tracker = CollapseEventTracker::new();
+    let mut event_tracker = CollapseEventTracker::new(dont_collapse_nodes);
 
-    let mut has_changed = true;
-    while has_changed {
-        has_changed = false;
-        let mut queue: VecDeque<Handle> = VecDeque::new();
-        queue.extend(graph.handles().chain(graph.handles().map(|v| v.flip())));
-        while let Some(v) = queue.pop_front() {
-            if !del_subg.node_deleted(&v) {
-                log::debug!("processing oriented node {}", v2str(&v));
-
-                // process node in forward direction
-                let affixes =
-                    enumerate_walk_preserving_shared_affixes(graph, &del_subg, v).unwrap();
-                for affix in affixes.iter() {
-                    has_changed |= true;
-                    // in each iteration, the set of deleted nodes can change and affect the
-                    // subsequent iteration, so we need to check the status the node every time
-                    if affix
-                        .shared_prefix_nodes
-                        .iter()
-                        .chain(affix.parents.iter())
-                        .any(|u| del_subg.node_deleted(u))
-                    {
-                        // push non-deleted parents back on queue
-                        queue.extend(affix.parents.iter().filter(|u| !del_subg.node_deleted(u)));
-                    } else {
-                        print(affix, out).unwrap();
-                        if affix
-                            .parents
-                            .iter()
-                            .chain(affix.shared_prefix_nodes.iter())
-                            .any(|&u| {
-                                event_tracker
-                                    .modified_nodes
-                                    .contains(&(u.unpack_number() as usize, graph.node_len(u)))
-                            })
-                        {
-                            event_tracker.overlapping_events += 1
-                        }
-                        let shared_prefix_node =
-                            collapse(graph, affix, &mut del_subg, &mut event_tracker);
-
-                        queue.push_back(shared_prefix_node);
-                        queue.push_back(shared_prefix_node.flip());
-                    }
+    let mut queue : Vec<Handle> = graph.handles().chain(graph.handles().map(|v| v.flip())).collect();
+    while !queue.is_empty() {
+        let cur_affixes = find_walk_preserving_shared_affixes(graph, &del_subg, queue);
+        queue = Vec::new();
+       for affix in cur_affixes.iter() {
+            // in each iteration, the set of deleted nodes can change and affect the
+            // subsequent iteration, so we need to check the status the node every time
+            if affix
+                .shared_prefix_nodes
+                .iter()
+                .chain(affix.parents.iter())
+                .any(|u| del_subg.node_deleted(u))
+            {
+                // push non-deleted parents back on queue
+                queue.extend(affix.parents.iter().filter(|u| !del_subg.node_deleted(u)));
+            } else {
+                affixes.push(affix.clone());
+                if affix
+                    .parents
+                    .iter()
+                    .chain(affix.shared_prefix_nodes.iter())
+                    .any(|&u| {
+                        event_tracker
+                            .modified_nodes
+                            .contains(&(u.unpack_number() as usize, graph.node_len(u)))
+                    })
+                {
+                    event_tracker.overlapping_events += 1
                 }
+                let shared_prefix_node =
+                    collapse(graph, affix, &mut del_subg, &mut event_tracker);
+
+                queue.extend(find_affected_nodes(graph, &del_subg, shared_prefix_node));
             }
         }
     }
@@ -449,7 +552,28 @@ fn find_and_collapse_walk_preserving_shared_affixes<W: Write>(
         event_tracker.overlapping_events,
         event_tracker.bubbles
     );
-    (del_subg, event_tracker)
+    (affixes, del_subg, event_tracker)
+}
+
+fn merge_graphs(component: Vec<HashGraph>, endpoints: HashGraph, del_subg: &DeletedSubGraph) -> HashGraph{
+
+    let mut res = endpoints;
+
+    for g in component {
+        for v in g.handles() {
+            if !del_subg.node_deleted(&v) && !res.has_node(v) {
+                res.create_handle(&g.sequence_vec(v)[..], v.id());
+            }
+        }
+        for e in g.edges() {
+            if !del_subg.edge_deleted(&e.0, &e.1){
+                assert!(!res.has_edge(e.0, e.1), "assumed edges are disjoint");
+                res.create_edge(e);
+            }
+        }
+    }
+
+    res
 }
 
 fn transform_path(
@@ -661,6 +785,7 @@ fn parse_and_transform_paths<W: io::Write, T: OptFields>(
     gfa: &GFA<usize, T>,
     orig_node_lens: &FxHashMap<usize, usize>,
     transform: &FxHashMap<(usize, usize), Vec<(usize, Direction, usize)>>,
+    walks: &FxHashMap<Vec<u8>, Vec<u8>>,
     out: &mut io::BufWriter<W>,
 ) -> Result<(), Box<dyn Error>> {
     for path in gfa.paths.iter() {
@@ -681,106 +806,12 @@ fn parse_and_transform_paths<W: io::Write, T: OptFields>(
                 .collect::<Vec<(usize, Direction, usize)>>()[..],
             transform,
         );
-        writeln!(
-            out,
-            "P\t{}\t{}\t{}",
-            str::from_utf8(&path.path_name)?,
-            tpath
-                .iter()
-                .map(|(sid, o)| format!(
-                    "{}{}",
-                    sid,
-                    if *o == Direction::Right { '+' } else { '-' }
-                ))
-                .collect::<Vec<String>>()
-                .join(","),
-            path.overlaps
-                .iter()
-                .map(|x| match x {
-                    None => "*".to_string(),
-                    Some(c) => c.to_string(),
-                })
-                .collect::<Vec<String>>()
-                .join("")
-        )?;
-    }
 
-    Ok(())
-}
-
-fn parse_and_transform_walks<W: io::Write, R: io::Read>(
-    mut data: io::BufReader<R>,
-    //    graph: &HashGraph,
-    transform: FxHashMap<(usize, usize), Vec<(usize, Direction, usize)>>,
-    orig_node_lens: &FxHashMap<usize, usize>,
-    //    del_subg: &DeletedSubGraph,
-    out: &mut io::BufWriter<W>,
-) -> Result<(), Box<dyn Error>> {
-    let reader = Csv::from_reader(&mut data)
-        .delimiter(b'\t')
-        .flexible(true)
-        .has_header(false);
-
-    for row in reader {
-        let row = row.unwrap();
-        let mut row_it = row.bytes_columns();
-
-        if [b'W'] == row_it.next().unwrap() {
-            let sample_id = str::from_utf8(row_it.next().unwrap())?;
-            let hap_idx = str::from_utf8(row_it.next().unwrap())?;
-            let seq_id = str::from_utf8(row_it.next().unwrap())?;
-            let seq_start = str::from_utf8(row_it.next().unwrap())?;
-            let seq_end = str::from_utf8(row_it.next().unwrap())?;
-            let walk_ident = format!(
-                "{}#{}#{}:{}-{}",
-                sample_id, hap_idx, seq_id, seq_start, seq_end
-            );
-            log::debug!("transforming walk {}", walk_ident);
-
-            let walk_data = row_it.next().unwrap();
-            let mut walk: Vec<(usize, Direction, usize)> = Vec::new();
-
-            let mut cur_el: Vec<u8> = Vec::new();
-            for c in walk_data {
-                if (c == &b'>' || c == &b'<') && !cur_el.is_empty() {
-                    let sid = usize::from_str(str::from_utf8(&cur_el[1..])?)?;
-                    let o = match cur_el[0] {
-                        b'>' => Direction::Right,
-                        b'<' => Direction::Left,
-                        _ => panic!(
-                            "unknown orientation '{}' of segment {} in walk {}",
-                            cur_el[0], sid, walk_ident
-                        ),
-                    };
-                    walk.push((sid, o, *orig_node_lens.get(&sid).unwrap()));
-                    cur_el.clear();
-                }
-                cur_el.push(*c);
-            }
-
-            if !cur_el.is_empty() {
-                let sid = usize::from_str(str::from_utf8(&cur_el[1..])?)?;
-                let o = match cur_el[0] {
-                    b'>' => Direction::Right,
-                    b'<' => Direction::Left,
-                    _ => panic!(
-                        "unknown orientation '{}' of segment {} in walk {}",
-                        cur_el[0], sid, walk_ident
-                    ),
-                };
-                walk.push((sid, o, *orig_node_lens.get(&sid).unwrap()));
-            }
-
-            let tpath = transform_path(&walk, &transform);
-            //            check_path(graph, del_subg, &tpath);
+        if walks.contains_key(&path.path_name) {
             writeln!(
                 out,
-                "W\t{}\t{}\t{}\t{}\t{}\t{}",
-                sample_id,
-                hap_idx,
-                seq_id,
-                seq_start,
-                seq_end,
+                "W\t{}\t{}",
+                str::from_utf8(walks.get(&path.path_name).unwrap())?,
                 tpath
                     .iter()
                     .map(|(sid, o)| format!(
@@ -788,6 +819,29 @@ fn parse_and_transform_walks<W: io::Write, R: io::Read>(
                         if *o == Direction::Right { '>' } else { '<' },
                         sid
                     ))
+                    .collect::<Vec<String>>()
+                    .join("")
+            )?;
+        } else {
+            writeln!(
+                out,
+                "P\t{}\t{}\t{}",
+                str::from_utf8(&path.path_name)?,
+                tpath
+                    .iter()
+                    .map(|(sid, o)| format!(
+                        "{}{}",
+                        sid,
+                        if *o == Direction::Right { '+' } else { '-' }
+                    ))
+                    .collect::<Vec<String>>()
+                    .join(","),
+                path.overlaps
+                    .iter()
+                    .map(|x| match x {
+                        None => "*".to_string(),
+                        Some(c) => c.to_string(),
+                    })
                     .collect::<Vec<String>>()
                     .join("")
             )?;
@@ -877,48 +931,6 @@ fn remove_unused_copies<R: io::Read, T: OptFields>(
         count_copies(&mut visited_nodes, &mut visited_edges, &tpath);
     }
 
-    let reader = Csv::from_reader(&mut data)
-        .delimiter(b'\t')
-        .flexible(true)
-        .has_header(false);
-
-    for row in reader {
-        let row = row.unwrap();
-        let mut row_it = row.bytes_columns();
-
-        if [b'W'] == row_it.next().unwrap_or(&[b'$']) {
-            let walk_data = row_it.nth(5).unwrap();
-            let mut walk: Vec<(usize, Direction, usize)> = Vec::new();
-
-            let mut cur_el: Vec<u8> = Vec::new();
-            for c in walk_data {
-                if (c == &b'>' || c == &b'<') && !cur_el.is_empty() {
-                    let sid = usize::from_str(str::from_utf8(&cur_el[1..]).unwrap()).unwrap();
-                    let o = match cur_el[0] {
-                        b'>' => Direction::Right,
-                        b'<' => Direction::Left,
-                        _ => panic!("unknown orientation '{}' of segment {}", cur_el[0], sid),
-                    };
-                    walk.push((sid, o, *orig_node_lens.get(&sid).unwrap()));
-                    cur_el.clear();
-                }
-                cur_el.push(*c);
-            }
-
-            if !cur_el.is_empty() {
-                let sid = usize::from_str(str::from_utf8(&cur_el[1..]).unwrap()).unwrap();
-                let o = match cur_el[0] {
-                    b'>' => Direction::Right,
-                    b'<' => Direction::Left,
-                    _ => panic!("unknown orientation '{}' of segment {}", cur_el[0], sid),
-                };
-                walk.push((sid, o, *orig_node_lens.get(&sid).unwrap()));
-            }
-            let tpath = transform_path(&walk, &transform);
-            count_copies(&mut visited_nodes, &mut visited_edges, &tpath);
-        }
-    }
-
     // counters for removed nodes and edges
     let mut cv = 0;
     let mut ce = 0;
@@ -944,6 +956,23 @@ fn remove_unused_copies<R: io::Read, T: OptFields>(
     (cv, ce)
 }
 
+fn parse_gfa_v12<R: io::Read>(
+    data: io::BufReader<R>,
+) -> (GFA<usize, ()>, FxHashMap<Vec<u8>, Vec<u8>>) {
+    let parser = GFAParser::new();
+
+    let mut walks = FxHashMap::default();
+    // TODO
+    //
+    let lines: Vec<Vec<u8>> = ByteLineReader::new(data)
+        .into_iter()
+        .map(|x| transform_walks(x, &mut walks))
+        .collect();
+    let gfa: GFA<usize, ()> = parser.parse_lines(lines.iter().map(|x| &x[..])).unwrap();
+
+    (gfa, walks)
+}
+
 fn main() -> Result<(), io::Error> {
     env_logger::init();
 
@@ -952,6 +981,17 @@ fn main() -> Result<(), io::Error> {
 
     // initialize command line parser & parse command line arguments
     let params = Command::parse();
+
+    if params.threads > 0 {
+        log::info!("running panacus on {} threads", &params.threads);
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(params.threads)
+            .build_global()
+            .unwrap();
+    } else {
+        log::info!("running panacus using all available CPUs");
+        rayon::ThreadPoolBuilder::new().build_global().unwrap();
+    }
 
     // check if regex of no_collapse_path is valid
     if !params.no_collapse_path.trim().is_empty() && Regex::new(&params.no_collapse_path).is_err() {
@@ -962,8 +1002,7 @@ fn main() -> Result<(), io::Error> {
     }
 
     log::info!("loading graph {}", &params.graph);
-    let parser = GFAParser::new();
-    let gfa: GFA<usize, ()> = parser.parse_file(&params.graph).unwrap();
+    let (gfa, walks) = parse_gfa_v12(io::BufReader::new(fs::File::open(&params.graph)?));
 
     log::info!("constructing handle graph");
     let mut graph = HashGraph::from_gfa(&gfa);
@@ -1023,12 +1062,17 @@ fn main() -> Result<(), io::Error> {
         .join("\t")
     )?;
 
-    let (mut del_subg, mut event_tracker) =
-        find_and_collapse_walk_preserving_shared_affixes(&mut graph, &mut out);
+    let (affixes, mut del_subg, mut event_tracker) =
+        find_and_collapse_walk_preserving_shared_affixes(&mut graph, &dont_collapse_nodes);
+
+    for affix in affixes {
+        print(&affix, &mut out)?;
+    }
 
     if !dont_collapse_nodes.is_empty() {
         log::info!("de-collapse no-collapse handles and update transformation table");
-        let copies = event_tracker.decollapse(&mut graph, dont_collapse_nodes);
+        let copies = event_tracker.decollapse(&mut graph, &mut del_subg);
+        let old_graph = HashGraph::from_gfa(&gfa);
 
         let data = io::BufReader::new(fs::File::open(&params.graph)?);
         log::info!("cleaning up copies created during de-duplication...");
@@ -1083,21 +1127,15 @@ fn main() -> Result<(), io::Error> {
                 params.refined_graph_out, e
             );
         }
-        log::info!("transforming paths");
-        if let Err(e) = parse_and_transform_paths(&gfa, &node_lens, &transform, &mut graph_out) {
+        log::info!("transforming paths+walks");
+        if let Err(e) =
+            parse_and_transform_paths(&gfa, &node_lens, &transform, &walks, &mut graph_out)
+        {
             panic!(
-                "unable to write refined GFA path lines to {}: {}",
+                "unable to write refined GFA path+walk lines to {}: {}",
                 params.refined_graph_out, e
             );
         };
-        log::info!("transforming walks");
-        let data = io::BufReader::new(fs::File::open(&params.graph)?);
-        if let Err(e) = parse_and_transform_walks(data, transform, &node_lens, &mut graph_out) {
-            panic!(
-                "unable to parse or write refined GFA walk lines to {}: {}",
-                params.refined_graph_out, e
-            );
-        }
     }
     out.flush()?;
     log::info!("done");
