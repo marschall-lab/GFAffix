@@ -1221,8 +1221,8 @@ fn main() -> Result<(), io::Error> {
     let (affixes, mut del_subg, mut event_tracker) =
         find_and_collapse_walk_preserving_shared_affixes(&mut graph, &dont_collapse_nodes);
 
-    log::info!("identifying walk-preserving blunt ends");
-    find_and_collapse_blunt_ends(&mut graph, &mut del_subg, &mut event_tracker);
+//    log::info!("identifying walk-preserving blunt ends");
+//    find_and_collapse_blunt_ends(&mut graph, &mut del_subg, &mut event_tracker);
 
     for affix in affixes {
         print(&affix, &mut out)?;
