@@ -50,7 +50,7 @@ impl DeletedSubGraph {
         }
     }
 
-    pub fn merge(del_subgs: Vec<Self>) -> Self{
+    pub fn merge(del_subgs: Vec<Self>) -> Self {
         let mut res = DeletedSubGraph::new();
 
         for x in del_subgs {

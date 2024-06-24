@@ -205,7 +205,7 @@ pub fn transform_walks(line: Vec<u8>, walk_map: &mut FxHashMap<Vec<u8>, Vec<u8>>
             orig.push(b'\t');
             orig.extend_from_slice(&seq_end[..]);
 
-            let mut path_name : Vec<u8> = Vec::new();
+            let mut path_name: Vec<u8> = Vec::new();
             path_name.extend_from_slice(&sample_id[..]);
             path_name.push(b'#');
             path_name.extend_from_slice(&haplo_id[..]);
@@ -218,10 +218,10 @@ pub fn transform_walks(line: Vec<u8>, walk_map: &mut FxHashMap<Vec<u8>, Vec<u8>>
 
             // create an ID that is unique to this particular walk, *just in case* a path with the
             // same signature already exists (which is highly unlikely, but hey, let's be sure!
-            path_name.push(b'$');
-            let mut hasher = DefaultHasher::new();
-            hasher.write(&orig);
-            path_name.extend_from_slice(hasher.finish().to_string().as_bytes());
+            //            path_name.push(b'$');
+            //            let mut hasher = DefaultHasher::new();
+            //            hasher.write(&orig);
+            //            path_name.extend_from_slice(hasher.finish().to_string().as_bytes());
 
             walk_map.insert(path_name.clone(), orig);
 
@@ -243,8 +243,6 @@ pub fn transform_walks(line: Vec<u8>, walk_map: &mut FxHashMap<Vec<u8>, Vec<u8>>
                     }
                     path.push(b',');
                     i = p + j;
-                } else {
-                    print!("found match at i={}, j={}\n", i, p + j);
                 }
                 p += j + 1;
             }

@@ -102,8 +102,10 @@ fn is_prefix_candidate(graph: &HashGraph, v: Handle) -> bool {
 }
 
 fn check_collapsible(graph: &HashGraph, v: Handle) -> bool {
-
-    is_prefix_candidate(graph, v) || graph.neighbors(v, Direction::Right).any(|u| is_prefix_candidate(graph, u.flip()))
+    is_prefix_candidate(graph, v)
+        || graph
+            .neighbors(v, Direction::Right)
+            .any(|u| is_prefix_candidate(graph, u.flip()))
 }
 
 pub fn assign_component(
@@ -202,13 +204,13 @@ pub fn split_into_subgraphs(graph: HashGraph) -> (Vec<HashGraph>, HashGraph) {
     let aps: Vec<Handle> = dg
         .find_articulation_points()
         .into_iter()
-        .filter(|v| { !check_collapsible(&graph, *v) && !check_collapsible(&graph, v.flip())
-        })
+        .filter(|v| !check_collapsible(&graph, *v) && !check_collapsible(&graph, v.flip()))
         .collect();
     let ends: Vec<Handle> = graph
         .handles()
         .filter(|v| {
-            (graph.degree(*v, Direction::Right) == 0 && !check_collapsible(&graph, v.flip())) || (graph.degree(*v, Direction::Left) == 0 && !check_collapsible(&graph, *v))
+            (graph.degree(*v, Direction::Right) == 0 && !check_collapsible(&graph, v.flip()))
+                || (graph.degree(*v, Direction::Left) == 0 && !check_collapsible(&graph, *v))
         })
         .collect();
 

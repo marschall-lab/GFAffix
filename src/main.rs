@@ -1,5 +1,5 @@
 /* standard use */
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 use std::error::Error;
 use std::fs;
 use std::io;
@@ -230,7 +230,7 @@ fn enumerate_walk_preserving_shared_affixes(
                     // don't do anything
                     res.push(AffixSubgraph {
                         sequence: prefix,
-                        parents: parents.clone(),
+                        parents: parents,
                         shared_prefix_nodes: children_vec,
                     });
                 } else {
@@ -469,14 +469,22 @@ fn get_shared_prefix(
     String::from_utf8(seq)
 }
 
-fn find_walk_preserving_shared_affixes(graph: &HashGraph, del_subg: &DeletedSubGraph, nodes: Vec<Handle>) -> Vec<AffixSubgraph> {
-    nodes.par_iter().filter_map(|v| {
-        if !del_subg.node_deleted(v) {
-            Some(enumerate_walk_preserving_shared_affixes(graph, &del_subg, *v).unwrap())
-        } else {
-            None
-        }
-    }).flatten().collect()
+fn find_walk_preserving_shared_affixes(
+    graph: &HashGraph,
+    del_subg: &DeletedSubGraph,
+    nodes: Vec<Handle>,
+) -> Vec<AffixSubgraph> {
+    nodes
+        .par_iter()
+        .filter_map(|v| {
+            if !del_subg.node_deleted(v) {
+                Some(enumerate_walk_preserving_shared_affixes(graph, &del_subg, *v).unwrap())
+            } else {
+                None
+            }
+        })
+        .flatten()
+        .collect()
 }
 
 fn find_affected_nodes(graph: &HashGraph, del_subg: &DeletedSubGraph, v: Handle) -> Vec<Handle> {
@@ -485,42 +493,174 @@ fn find_affected_nodes(graph: &HashGraph, del_subg: &DeletedSubGraph, v: Handle)
     let mut res = vec![v, v.flip()];
 
     for _ in 0..2 {
-        res.extend(queue.iter().cloned().filter_map(|v| {
-            if !del_subg.node_deleted(&v) {
-                Some(graph.neighbors(v, Direction::Right).filter(move |u| !del_subg.edge_deleted(&v, u) && !del_subg.node_deleted(u)).chain(graph.neighbors(v, Direction::Left).filter_map(move |u| if !del_subg.edge_deleted(&u, &v) && !del_subg.node_deleted(&u) { Some(u.flip()) } else { None}))) 
-            } else {
-                None
-            }
-        }).flatten());
-        let new_queue : Vec<Handle> = queue.into_iter().map(|v| graph.neighbors(v, Direction::Right).filter(move |u| !del_subg.edge_deleted(&v, u) && !del_subg.node_deleted(u))).flatten().collect();
+        res.extend(
+            queue
+                .iter()
+                .cloned()
+                .filter_map(|v| {
+                    if !del_subg.node_deleted(&v) {
+                        Some(
+                            graph
+                                .neighbors(v, Direction::Right)
+                                .filter(move |u| {
+                                    !del_subg.edge_deleted(&v, u) && !del_subg.node_deleted(u)
+                                })
+                                .chain(graph.neighbors(v, Direction::Left).filter_map(move |u| {
+                                    if !del_subg.edge_deleted(&u, &v) && !del_subg.node_deleted(&u)
+                                    {
+                                        Some(u.flip())
+                                    } else {
+                                        None
+                                    }
+                                })),
+                        )
+                    } else {
+                        None
+                    }
+                })
+                .flatten(),
+        );
+        let new_queue: Vec<Handle> = queue
+            .into_iter()
+            .map(|v| {
+                graph
+                    .neighbors(v, Direction::Right)
+                    .filter(move |u| !del_subg.edge_deleted(&v, u) && !del_subg.node_deleted(u))
+            })
+            .flatten()
+            .collect();
         queue = new_queue;
     }
 
     res
 }
 
+fn find_collapsible_blunt_end_pair(
+    graph: &HashGraph,
+    del_subg: &DeletedSubGraph,
+    v: Handle,
+) -> Option<Handle> {
+    if del_subg.node_deleted(&v) || graph.degree(v, Direction::Left) > 0 {
+        None
+    } else {
+        let l = graph.node_len(v);
+        graph
+            .neighbors(v, Direction::Right)
+            .filter_map(|u| {
+                if del_subg.node_deleted(&u) {
+                    None
+                } else {
+                    graph
+                        .neighbors(u, Direction::Left)
+                        .filter_map(|w| {
+                            if del_subg.node_deleted(&w)
+                                || w == v
+                                || get_shared_prefix(&[w.flip(), v.flip()], graph)
+                                    .unwrap()
+                                    .len()
+                                    != l
+                                || !HashSet::<Handle>::from_iter(
+                                    graph.neighbors(v, Direction::Right),
+                                )
+                                .is_subset(&HashSet::from_iter(
+                                    graph.neighbors(w, Direction::Right),
+                                ))
+                            {
+                                None
+                            } else {
+                                log::info!(
+                                    "found collapsible blunt end pair {}, {}",
+                                    v2str(&v),
+                                    v2str(&w)
+                                );
+                                Some(w)
+                            }
+                        })
+                        .next()
+                }
+            })
+            .next()
+    }
+}
+
+fn find_and_collapse_blunt_ends(
+    graph: &mut HashGraph,
+    del_subg: &mut DeletedSubGraph,
+    event_tracker: &mut CollapseEventTracker,
+) {
+    let mut queue: Vec<Handle> = graph
+        .handles()
+        .chain(graph.handles().map(|v| v.flip()))
+        .collect();
+
+    while !queue.is_empty() {
+        let collapsible_blunts: Vec<(Handle, Handle)> = queue
+            .par_iter()
+            .filter_map(|&v| find_collapsible_blunt_end_pair(graph, del_subg, v).map(|u| (v, u)))
+            .collect();
+
+        let mut modified_nodes: FxHashSet<Handle> = FxHashSet::default();
+        let mut new_queue: Vec<Handle> = Vec::new();
+        for (v, u) in collapsible_blunts {
+            if modified_nodes.contains(&v.forward()) || modified_nodes.contains(&u.forward()) {
+                // we only need to re-assess the blunt end
+                new_queue.push(v);
+            } else {
+                // remove *one* character, because VG assumes that each chromosome starts with a
+                // left-degree 0 node
+                let prefix = String::from_utf8({let mut x = graph.sequence_vec(v.flip()); x.pop(); x}).unwrap();
+                if !prefix.is_empty() {
+                collapse(
+                    graph,
+                    &AffixSubgraph {
+                        sequence: prefix,
+                        parents: graph
+                            .neighbors(v, Direction::Right)
+                            .map(|v| v.flip())
+                            .collect(),
+                        shared_prefix_nodes: vec![v.flip(), u.flip()],
+                    },
+                    del_subg,
+                    event_tracker,
+                );
+                modified_nodes.insert(v.forward());
+                modified_nodes.insert(u.forward());
+                }
+            }
+        }
+        queue = new_queue;
+    }
+}
+
 fn find_and_collapse_walk_preserving_shared_affixes<'a>(
     graph: &mut HashGraph,
     dont_collapse_nodes: &'a FxHashSet<(usize, usize)>,
-) -> (Vec<AffixSubgraph>, DeletedSubGraph, CollapseEventTracker<'a>) {
-
+) -> (
+    Vec<AffixSubgraph>,
+    DeletedSubGraph,
+    CollapseEventTracker<'a>,
+) {
     let mut affixes = Vec::new();
     let mut del_subg = DeletedSubGraph::new();
 
     let mut event_tracker = CollapseEventTracker::new(dont_collapse_nodes);
 
-    let mut queue : Vec<Handle> = graph.handles().chain(graph.handles().map(|v| v.flip())).collect();
+    let mut queue: Vec<Handle> = graph
+        .handles()
+        .chain(graph.handles().map(|v| v.flip()))
+        .collect();
     while !queue.is_empty() {
         let cur_affixes = find_walk_preserving_shared_affixes(graph, &del_subg, queue);
         queue = Vec::new();
-       for affix in cur_affixes.iter() {
+        let mut cur_modified_nodes = FxHashSet::default();
+        for affix in cur_affixes.iter() {
             // in each iteration, the set of deleted nodes can change and affect the
             // subsequent iteration, so we need to check the status the node every time
             if affix
                 .shared_prefix_nodes
                 .iter()
                 .chain(affix.parents.iter())
-                .any(|u| del_subg.node_deleted(u))
+                .any(|u| del_subg.node_deleted(u) || cur_modified_nodes.contains(&u.forward()))
             {
                 // push non-deleted parents back on queue
                 queue.extend(affix.parents.iter().filter(|u| !del_subg.node_deleted(u)));
@@ -538,9 +678,21 @@ fn find_and_collapse_walk_preserving_shared_affixes<'a>(
                 {
                     event_tracker.overlapping_events += 1
                 }
-                let shared_prefix_node =
-                    collapse(graph, affix, &mut del_subg, &mut event_tracker);
-
+                let shared_prefix_node = collapse(graph, affix, &mut del_subg, &mut event_tracker);
+                cur_modified_nodes.extend(affix.parents.iter().filter_map(|u| {
+                    if !del_subg.node_deleted(u) {
+                        Some(u.forward())
+                    } else {
+                        None
+                    }
+                }));
+                cur_modified_nodes.extend(affix.shared_prefix_nodes.iter().filter_map(|u| {
+                    if !del_subg.node_deleted(u) {
+                        Some(u.forward())
+                    } else {
+                        None
+                    }
+                }));
                 queue.extend(find_affected_nodes(graph, &del_subg, shared_prefix_node));
             }
         }
@@ -555,8 +707,11 @@ fn find_and_collapse_walk_preserving_shared_affixes<'a>(
     (affixes, del_subg, event_tracker)
 }
 
-fn merge_graphs(component: Vec<HashGraph>, endpoints: HashGraph, del_subg: &DeletedSubGraph) -> HashGraph{
-
+fn merge_graphs(
+    component: Vec<HashGraph>,
+    endpoints: HashGraph,
+    del_subg: &DeletedSubGraph,
+) -> HashGraph {
     let mut res = endpoints;
 
     for g in component {
@@ -566,7 +721,7 @@ fn merge_graphs(component: Vec<HashGraph>, endpoints: HashGraph, del_subg: &Dele
             }
         }
         for e in g.edges() {
-            if !del_subg.edge_deleted(&e.0, &e.1){
+            if !del_subg.edge_deleted(&e.0, &e.1) {
                 assert!(!res.has_edge(e.0, e.1), "assumed edges are disjoint");
                 res.create_edge(e);
             }
@@ -861,6 +1016,7 @@ fn parse_header<R: io::Read>(mut data: io::BufReader<R>) -> Result<Vec<u8>, io::
             }
             break;
         }
+        buf.clear();
     }
     Ok(buf)
 }
@@ -1064,6 +1220,9 @@ fn main() -> Result<(), io::Error> {
 
     let (affixes, mut del_subg, mut event_tracker) =
         find_and_collapse_walk_preserving_shared_affixes(&mut graph, &dont_collapse_nodes);
+
+    log::info!("identifying walk-preserving blunt ends");
+    find_and_collapse_blunt_ends(&mut graph, &mut del_subg, &mut event_tracker);
 
     for affix in affixes {
         print(&affix, &mut out)?;

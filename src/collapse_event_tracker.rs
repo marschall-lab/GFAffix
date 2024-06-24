@@ -53,7 +53,7 @@ impl<'a> CollapseEventTracker<'a> {
             "storing right-side edges of to-be-collapsed siblings {}",
             original_blunt_edges
                 .iter()
-          .map(|(v, _)| format!(
+                .map(|(v, _)| format!(
                     "{}{}:{}",
                     match v.1 {
                         Direction::Left => "<",
@@ -643,15 +643,25 @@ impl<'a> CollapseEventTracker<'a> {
     }
 
     pub fn merge(event_trackers: Vec<Self>) -> Self {
-        assert!(event_trackers.len() > 0, "assumed non-empty list of event trackers");
-        let mut res = CollapseEventTracker::new(event_trackers.first().unwrap().dont_collapse_nodes);
+        assert!(
+            event_trackers.len() > 0,
+            "assumed non-empty list of event trackers"
+        );
+        let mut res =
+            CollapseEventTracker::new(event_trackers.first().unwrap().dont_collapse_nodes);
 
         for x in event_trackers {
-            assert!(x.transform.keys().all(|x| !res.transform.contains_key(x)), "assumed transformations are disjoint");
+            assert!(
+                x.transform.keys().all(|x| !res.transform.contains_key(x)),
+                "assumed transformations are disjoint"
+            );
             res.transform.extend(x.transform.into_iter());
-            res.dont_collapse_edges.extend(x.dont_collapse_edges.into_iter());
-            res.dont_collapse_siblings_group.extend(x.dont_collapse_siblings_group.into_iter());
-            res.dont_collapse_siblings_members.extend(x.dont_collapse_siblings_members.into_iter());
+            res.dont_collapse_edges
+                .extend(x.dont_collapse_edges.into_iter());
+            res.dont_collapse_siblings_group
+                .extend(x.dont_collapse_siblings_group.into_iter());
+            res.dont_collapse_siblings_members
+                .extend(x.dont_collapse_siblings_members.into_iter());
             res.overlapping_events += x.overlapping_events;
             res.bubbles += x.bubbles;
             res.events += x.events;
@@ -661,4 +671,3 @@ impl<'a> CollapseEventTracker<'a> {
         res
     }
 }
-
