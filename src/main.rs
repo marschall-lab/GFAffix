@@ -432,7 +432,7 @@ fn get_shared_prefix(
 ) -> Result<String, std::string::FromUtf8Error> {
     let mut seq: Vec<u8> = Vec::new();
 
-    let sequences: Vec<Vec<u8>> = nodes.iter().map(|v| graph.sequence_vec(*v)).collect();
+    let sequences: Vec<Vec<u8>> = nodes.par_iter().map(|v| graph.sequence_vec(*v)).collect();
 
     let mut i = 0;
     while sequences[0].len() > i {
@@ -814,7 +814,7 @@ fn check_transform(
     del_subg: &DeletedSubGraph,
 ) {
     transform.par_iter().for_each(|((vid, vlen), path)| {
-        let path_len: usize = path.par_iter().map(|x| x.2).sum();
+        let path_len: usize = path.iter().map(|x| x.2).sum();
         if *vlen != path_len {
             panic!(
                 "length of walk {} does not sum up to that of its replacing node of {}:{}",
@@ -862,7 +862,7 @@ fn check_transform(
                     "node {} in old graph spells sequence {}, but walk {} in new graph spell sequence {}",
                     vid,
                     String::from_utf8(old_seq).unwrap(),
-                    path.iter()
+                    path.iter().par_bridge()
                         .map(|(rid, ro, _)| format!(
                                 "{}{}",
                                 if *ro == Direction::Left { '<' } else { '>' },
@@ -953,6 +953,7 @@ fn parse_and_transform_paths<W: io::Write, T: OptFields>(
         let tpath = transform_path(
             &path
                 .iter()
+                .par_bridge()
                 .map(|(sid, o)| {
                     (
                         sid,
@@ -973,7 +974,7 @@ fn parse_and_transform_paths<W: io::Write, T: OptFields>(
                 "W\t{}\t{}",
                 str::from_utf8(walks.get(&path.path_name[..]).unwrap())?,
                 tpath
-                    .iter()
+                    .par_iter()
                     .map(|(sid, o)| format!(
                         "{}{}",
                         if *o == Direction::Right { '>' } else { '<' },
@@ -988,7 +989,7 @@ fn parse_and_transform_paths<W: io::Write, T: OptFields>(
                 "P\t{}\t{}\t{}",
                 str::from_utf8(&path.path_name)?,
                 tpath
-                    .iter()
+                    .par_iter()
                     .map(|(sid, o)| format!(
                         "{}{}",
                         sid,
@@ -997,7 +998,7 @@ fn parse_and_transform_paths<W: io::Write, T: OptFields>(
                     .collect::<Vec<String>>()
                     .join(","),
                 path.overlaps
-                    .iter()
+                    .iter().par_bridge()
                     .map(|x| match x {
                         None => "*".to_string(),
                         Some(c) => c.to_string(),
