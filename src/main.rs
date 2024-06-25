@@ -608,23 +608,28 @@ fn find_and_collapse_blunt_ends(
             } else {
                 // remove *one* character, because VG assumes that each chromosome starts with a
                 // left-degree 0 node
-                let prefix = String::from_utf8({let mut x = graph.sequence_vec(v.flip()); x.pop(); x}).unwrap();
+                let prefix = String::from_utf8({
+                    let mut x = graph.sequence_vec(v.flip());
+                    x.pop();
+                    x
+                })
+                .unwrap();
                 if !prefix.is_empty() {
-                collapse(
-                    graph,
-                    &AffixSubgraph {
-                        sequence: prefix,
-                        parents: graph
-                            .neighbors(v, Direction::Right)
-                            .map(|v| v.flip())
-                            .collect(),
-                        shared_prefix_nodes: vec![v.flip(), u.flip()],
-                    },
-                    del_subg,
-                    event_tracker,
-                );
-                modified_nodes.insert(v.forward());
-                modified_nodes.insert(u.forward());
+                    collapse(
+                        graph,
+                        &AffixSubgraph {
+                            sequence: prefix,
+                            parents: graph
+                                .neighbors(v, Direction::Right)
+                                .map(|v| v.flip())
+                                .collect(),
+                            shared_prefix_nodes: vec![v.flip(), u.flip()],
+                        },
+                        del_subg,
+                        event_tracker,
+                    );
+                    modified_nodes.insert(v.forward());
+                    modified_nodes.insert(u.forward());
                 }
             }
         }
@@ -808,8 +813,8 @@ fn check_transform(
     transform: &FxHashMap<(usize, usize), Vec<(usize, Direction, usize)>>,
     del_subg: &DeletedSubGraph,
 ) {
-    for ((vid, vlen), path) in transform.iter() {
-        let path_len: usize = path.iter().map(|x| x.2).sum();
+    transform.par_iter().for_each(|((vid, vlen), path)| {
+        let path_len: usize = path.par_iter().map(|x| x.2).sum();
         if *vlen != path_len {
             panic!(
                 "length of walk {} does not sum up to that of its replacing node of {}:{}",
@@ -868,7 +873,7 @@ fn check_transform(
                     );
             }
         }
-    }
+    });
 }
 
 fn print_transformations<W: Write>(
@@ -1221,8 +1226,8 @@ fn main() -> Result<(), io::Error> {
     let (affixes, mut del_subg, mut event_tracker) =
         find_and_collapse_walk_preserving_shared_affixes(&mut graph, &dont_collapse_nodes);
 
-//    log::info!("identifying walk-preserving blunt ends");
-//    find_and_collapse_blunt_ends(&mut graph, &mut del_subg, &mut event_tracker);
+    //    log::info!("identifying walk-preserving blunt ends");
+    //    find_and_collapse_blunt_ends(&mut graph, &mut del_subg, &mut event_tracker);
 
     for affix in affixes {
         print(&affix, &mut out)?;
