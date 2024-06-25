@@ -1191,7 +1191,7 @@ fn main() -> Result<(), io::Error> {
     let mut dont_collapse_nodes: FxHashSet<(usize, usize)> = FxHashSet::default();
     if !params.no_collapse_path.trim().is_empty() {
         let re = Regex::new(&params.no_collapse_path).unwrap();
-        for path in gfa.paths.iter() {
+        for path in paths.iter() {
             let path_name = str::from_utf8(&path.path_name[..]).unwrap();
             if re.is_match(path_name) {
                 dont_collapse_nodes.extend(
@@ -1256,6 +1256,7 @@ fn main() -> Result<(), io::Error> {
 
     if params.check_transformation {
         log::info!("checking correctness of applied transformations...");
+
         let old_graph = HashGraph::from_gfa(&gfa);
         check_transform(&old_graph, &graph, &transform, &del_subg);
         log::info!("all correct!");
@@ -1290,6 +1291,9 @@ fn main() -> Result<(), io::Error> {
                 params.refined_graph_out, e
             );
         }
+
+        // swap paths back in to produce final output
+        std::mem::swap(&mut gfa.paths, &mut paths);
         log::info!("transforming paths+walks");
         if let Err(e) =
             parse_and_transform_paths(&gfa, &node_lens, &transform, &walks, &mut graph_out)
