@@ -1163,7 +1163,14 @@ fn main() -> Result<(), io::Error> {
     }
 
     log::info!("loading graph {}", &params.graph);
-    let (gfa, walks) = parse_gfa_v12(io::BufReader::new(fs::File::open(&params.graph)?));
+    let (mut gfa, walks) = parse_gfa_v12(io::BufReader::new(fs::File::open(&params.graph)?));
+
+    //
+    // REMOVING PATHS FROM GRAPH -- they SUBSTANTIALLY slow down graph editing
+    //
+    //
+    let mut paths = Vec::new();
+    std::mem::swap(&mut gfa.paths, &mut paths);
 
     log::info!("constructing handle graph");
     let mut graph = HashGraph::from_gfa(&gfa);
@@ -1182,18 +1189,15 @@ fn main() -> Result<(), io::Error> {
     }
 
     let mut dont_collapse_nodes: FxHashSet<(usize, usize)> = FxHashSet::default();
-
     if !params.no_collapse_path.trim().is_empty() {
         let re = Regex::new(&params.no_collapse_path).unwrap();
-        for path_id in graph.paths.keys() {
-            let path_name_vec = graph.get_path_name_vec(*path_id).unwrap();
-            let path_name = str::from_utf8(&path_name_vec[..]).unwrap();
+        for path in gfa.paths.iter() {
+            let path_name = str::from_utf8(&path.path_name[..]).unwrap();
             if re.is_match(path_name) {
-                let path = graph.get_path(path_id).unwrap();
-                dont_collapse_nodes.extend(path.nodes.iter().map(|&x| {
-                    let xid = x.unpack_number() as usize;
-                    (xid, *node_lens.get(&xid).unwrap())
-                }));
+                dont_collapse_nodes.extend(
+                    path.iter()
+                        .map(|(xid, _)| (xid, *node_lens.get(&xid).unwrap())),
+                );
 
                 log::info!(
                     "flagging nodes of path {} as non-collapsing, total number is now at {}",
@@ -1203,11 +1207,6 @@ fn main() -> Result<(), io::Error> {
             }
         }
     }
-
-    //
-    // REMOVING PATHS FROM GRAPH -- they SUBSTANTIALLY slow down graph editing
-    //
-    graph.paths.clear();
 
     log::info!("identifying walk-preserving shared affixes");
     // yes, that's a "prefix", not an affix--because nodes are oriented accordingly
