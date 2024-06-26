@@ -489,7 +489,6 @@ fn find_walk_preserving_shared_affixes(
         .collect()
 }
 
-
 fn find_affected_nodes(graph: &HashGraph, del_subg: &DeletedSubGraph, v: Handle) -> Vec<Handle> {
     let mut queue: Vec<(usize, Handle)> = vec![(0, v)];
 
@@ -522,7 +521,6 @@ fn find_affected_nodes(graph: &HashGraph, del_subg: &DeletedSubGraph, v: Handle)
 
     res
 }
-
 
 fn find_collapsible_blunt_end_pair(
     graph: &HashGraph,
@@ -657,8 +655,13 @@ fn find_and_collapse_walk_preserving_shared_affixes<'a>(
                 .any(|u| del_subg.node_deleted(u) || cur_modified_nodes.contains(&u.forward()))
             {
                 // push non-deleted parents back on queue
-                queue.extend(affix.parents.iter().filter_map(|u| if !del_subg.node_deleted(u) {
-                    Some(u.flip()) } else { None}));
+                queue.extend(affix.parents.iter().filter_map(|u| {
+                    if !del_subg.node_deleted(u) {
+                        Some(u.flip())
+                    } else {
+                        None
+                    }
+                }));
             } else {
                 affixes.push(affix.clone());
                 if affix
@@ -726,39 +729,38 @@ fn merge_graphs(
     res
 }
 
-fn transform_path(
-    path: &[(usize, Direction, usize)],
+fn transform_node(
+    vid: usize,
+    orient: Orientation,
+    v_len: usize,
     transform: &FxHashMap<(usize, usize), Vec<(usize, Direction, usize)>>,
 ) -> Vec<(usize, Direction)> {
-    let mut res: Vec<(usize, Direction)> = Vec::new();
-
-    for (sid, o, slen) in path.iter() {
-        match transform.get(&(*sid, *slen)) {
-            Some(us) => res.extend(match o {
-                Direction::Right => us
-                    .iter()
-                    .map(|(x, y, _)| (*x, *y))
-                    .collect::<Vec<(usize, Direction)>>(),
-                Direction::Left => us
-                    .iter()
-                    .rev()
-                    .map(|(x, y, _)| {
-                        (
-                            *x,
-                            if *y == Direction::Left {
-                                Direction::Right
-                            } else {
-                                Direction::Left
-                            },
-                        )
-                    })
-                    .collect::<Vec<(usize, Direction)>>(),
-            }),
-            None => res.push((*sid, *o)),
-        }
+    match transform.get(&(vid, v_len)) {
+        Some(us) => match orient {
+            Orientation::Forward => us.iter().map(|(x, y, _)| (*x, *y)).collect(),
+            Orientation::Backward => us
+                .iter()
+                .rev()
+                .map(|(x, y, _)| {
+                    (
+                        *x,
+                        if *y == Direction::Left {
+                            Direction::Right
+                        } else {
+                            Direction::Left
+                        },
+                    )
+                })
+                .collect(),
+        },
+        None => vec![(
+            vid,
+            match orient {
+                Orientation::Forward => Direction::Right,
+                Orientation::Backward => Direction::Left,
+            },
+        )],
     }
-
-    res
 }
 
 fn print_active_subgraph<W: io::Write>(
@@ -940,36 +942,20 @@ fn parse_and_transform_paths<W: io::Write, T: OptFields>(
 ) -> Result<(), Box<dyn Error>> {
     for path in gfa.paths.iter() {
         log::debug!("transforming path {}", str::from_utf8(&path.path_name)?);
-        let tpath = transform_path(
-            &path
-                .iter()
-                .par_bridge()
-                .map(|(sid, o)| {
-                    (
-                        sid,
-                        match o {
-                            Orientation::Forward => Direction::Right,
-                            Orientation::Backward => Direction::Left,
-                        },
-                        *orig_node_lens.get(&sid).unwrap(),
-                    )
-                })
-                .collect::<Vec<(usize, Direction, usize)>>()[..],
-            transform,
-        );
-
         if walks.contains_key(&path.path_name[..]) {
             writeln!(
                 out,
                 "W\t{}\t{}",
                 str::from_utf8(walks.get(&path.path_name[..]).unwrap())?,
-                tpath
-                    .par_iter()
-                    .map(|(sid, o)| format!(
-                        "{}{}",
-                        if *o == Direction::Right { '>' } else { '<' },
-                        sid
-                    ))
+                path.iter()
+                    .map(|(sid, o)| {
+                        transform_node(sid, o, *orig_node_lens.get(&sid).unwrap(), transform)
+                            .into_iter()
+                            .map(|(vid, d)| {
+                                format!("{}{}", if d == Direction::Right { '>' } else { '<' }, vid)
+                            })
+                    })
+                    .flatten()
                     .collect::<Vec<String>>()
                     .join("")
             )?;
@@ -978,15 +964,17 @@ fn parse_and_transform_paths<W: io::Write, T: OptFields>(
                 out,
                 "P\t{}\t{}\t{}",
                 str::from_utf8(&path.path_name)?,
-                tpath
-                    .par_iter()
-                    .map(|(sid, o)| format!(
-                        "{}{}",
-                        sid,
-                        if *o == Direction::Right { '+' } else { '-' }
-                    ))
+                path.iter()
+                    .map(|(sid, o)| {
+                        transform_node(sid, o, *orig_node_lens.get(&sid).unwrap(), transform)
+                            .into_iter()
+                            .map(|(vid, d)| {
+                                format!("{}{}", vid, if d == Direction::Right { '+' } else { '-' })
+                            })
+                    })
+                    .flatten()
                     .collect::<Vec<String>>()
-                    .join(","),
+                    .join(""),
                 path.overlaps
                     .iter()
                     .par_bridge()
@@ -1039,75 +1027,75 @@ fn count_copies(
     }
 }
 
-fn remove_unused_copies<R: io::Read, T: OptFields>(
-    copies: &Vec<usize>,
-    graph: &HashGraph,
-    mut data: io::BufReader<R>,
-    gfa: &GFA<usize, T>,
-    orig_node_lens: &FxHashMap<usize, usize>,
-    transform: &FxHashMap<(usize, usize), Vec<(usize, Direction, usize)>>,
-    del_subg: &mut DeletedSubGraph,
-) -> (usize, usize) {
-    // construct hashmap for counting the visits of edges introduced by the duplication process
-    let mut visited_edges = FxHashMap::default();
-    for i in copies.iter() {
-        let v = Handle::pack(*i, false);
-        for w in graph.neighbors(v, Direction::Left) {
-            visited_edges.insert(Edge::edge_handle(w, v), 0);
-        }
-        for w in graph.neighbors(v, Direction::Right) {
-            visited_edges.insert(Edge::edge_handle(v, w), 0);
-        }
-    }
-
-    // construct hashmap to count visits to nodes
-    let mut visited_nodes: FxHashMap<usize, usize> =
-        FxHashMap::from_iter(copies.iter().cloned().zip(repeat(0)));
-
-    for path in gfa.paths.iter() {
-        let tpath = transform_path(
-            &path
-                .iter()
-                .map(|(sid, o)| {
-                    (
-                        sid,
-                        match o {
-                            Orientation::Forward => Direction::Right,
-                            Orientation::Backward => Direction::Left,
-                        },
-                        *orig_node_lens.get(&sid).unwrap(),
-                    )
-                })
-                .collect::<Vec<(usize, Direction, usize)>>()[..],
-            transform,
-        );
-        count_copies(&mut visited_nodes, &mut visited_edges, &tpath);
-    }
-
-    // counters for removed nodes and edges
-    let mut cv = 0;
-    let mut ce = 0;
-
-    for (i, c) in visited_nodes.iter() {
-        if *c == 0 {
-            log::debug!("Removing unused duplicate node {}", i);
-            del_subg.add_node(Handle::pack(*i, false));
-            cv += 1;
-        }
-    }
-
-    for (Edge(u, v), c) in visited_edges.iter() {
-        if *c == 0 {
-            log::debug!("Removing unused duplicate edge {}{}", v2str(u), v2str(v));
-            // we don't need Edge::edge_handle here, because edges in visited_edges are already
-            // canonical
-            del_subg.add_edge(Edge(*u, *v));
-            ce += 1;
-        }
-    }
-
-    (cv, ce)
-}
+//fn remove_unused_copies<R: io::Read, T: OptFields>(
+//    copies: &Vec<usize>,
+//    graph: &HashGraph,
+//    mut data: io::BufReader<R>,
+//    gfa: &GFA<usize, T>,
+//    orig_node_lens: &FxHashMap<usize, usize>,
+//    transform: &FxHashMap<(usize, usize), Vec<(usize, Direction, usize)>>,
+//    del_subg: &mut DeletedSubGraph,
+//) -> (usize, usize) {
+//    // construct hashmap for counting the visits of edges introduced by the duplication process
+//    let mut visited_edges = FxHashMap::default();
+//    for i in copies.iter() {
+//        let v = Handle::pack(*i, false);
+//        for w in graph.neighbors(v, Direction::Left) {
+//            visited_edges.insert(Edge::edge_handle(w, v), 0);
+//        }
+//        for w in graph.neighbors(v, Direction::Right) {
+//            visited_edges.insert(Edge::edge_handle(v, w), 0);
+//        }
+//    }
+//
+//    // construct hashmap to count visits to nodes
+//    let mut visited_nodes: FxHashMap<usize, usize> =
+//        FxHashMap::from_iter(copies.iter().cloned().zip(repeat(0)));
+//
+//    for path in gfa.paths.iter() {
+//        let tpath = transform_path(
+//            &path
+//                .iter()
+//                .map(|(sid, o)| {
+//                    (
+//                        sid,
+//                        match o {
+//                            Orientation::Forward => Direction::Right,
+//                            Orientation::Backward => Direction::Left,
+//                        },
+//                        *orig_node_lens.get(&sid).unwrap(),
+//                    )
+//                })
+//                .collect::<Vec<(usize, Direction, usize)>>()[..],
+//            transform,
+//        );
+//        count_copies(&mut visited_nodes, &mut visited_edges, &tpath);
+//    }
+//
+//    // counters for removed nodes and edges
+//    let mut cv = 0;
+//    let mut ce = 0;
+//
+//    for (i, c) in visited_nodes.iter() {
+//        if *c == 0 {
+//            log::debug!("Removing unused duplicate node {}", i);
+//            del_subg.add_node(Handle::pack(*i, false));
+//            cv += 1;
+//        }
+//    }
+//
+//    for (Edge(u, v), c) in visited_edges.iter() {
+//        if *c == 0 {
+//            log::debug!("Removing unused duplicate edge {}{}", v2str(u), v2str(v));
+//            // we don't need Edge::edge_handle here, because edges in visited_edges are already
+//            // canonical
+//            del_subg.add_edge(Edge(*u, *v));
+//            ce += 1;
+//        }
+//    }
+//
+//    (cv, ce)
+//}
 
 fn parse_gfa_v12<R: io::Read>(
     data: io::BufReader<R>,
@@ -1227,20 +1215,20 @@ fn main() -> Result<(), io::Error> {
     if !dont_collapse_nodes.is_empty() {
         log::info!("de-collapse no-collapse handles and update transformation table");
         let copies = event_tracker.decollapse(&mut graph, &mut del_subg);
-        let old_graph = HashGraph::from_gfa(&gfa);
-
-        let data = io::BufReader::new(fs::File::open(&params.graph)?);
-        log::info!("cleaning up copies created during de-duplication...");
-        let (cv, ce) = remove_unused_copies(
-            &copies,
-            &graph,
-            data,
-            &gfa,
-            &node_lens,
-            &event_tracker.get_expanded_transformation(),
-            &mut del_subg,
-        );
-        log::info!("...removed {} unused duplicated nodes and {} edges", cv, ce);
+        //        let old_graph = HashGraph::from_gfa(&gfa);
+        //
+        //        let data = io::BufReader::new(fs::File::open(&params.graph)?);
+        //        log::info!("cleaning up copies created during de-duplication...");
+        //        let (cv, ce) = remove_unused_copies(
+        //            &copies,
+        //            &graph,
+        //            data,
+        //            &gfa,
+        //            &node_lens,
+        //            &event_tracker.get_expanded_transformation(),
+        //            &mut del_subg,
+        //        );
+        //        log::info!("...removed {} unused duplicated nodes and {} edges", cv, ce);
     }
 
     log::info!("expand transformation table");
