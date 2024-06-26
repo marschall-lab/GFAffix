@@ -218,10 +218,7 @@ pub fn transform_walks(line: Vec<u8>, walk_map: &mut FxHashMap<Vec<u8>, Vec<u8>>
 
             // create an ID that is unique to this particular walk, *just in case* a path with the
             // same signature already exists (which is highly unlikely, but hey, let's be sure!
-            //            path_name.push(b'$');
-            //            let mut hasher = DefaultHasher::new();
-            //            hasher.write(&orig);
-            //            path_name.extend_from_slice(hasher.finish().to_string().as_bytes());
+            path_name.extend_from_slice(b"$gfaffix");
 
             walk_map.insert(path_name.clone(), orig);
 

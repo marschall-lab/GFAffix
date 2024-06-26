@@ -38,7 +38,7 @@ use walk_transform::*;
 mod decomposition;
 use decomposition::*;
 
-const EXPLORE_NEIGHBORHOOD: usize = 4;
+const EXPLORE_NEIGHBORHOOD: usize = 2;
 
 #[derive(Parser, Debug)]
 #[clap(
