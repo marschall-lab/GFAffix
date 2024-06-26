@@ -38,6 +38,8 @@ use walk_transform::*;
 mod decomposition;
 use decomposition::*;
 
+const EXPLORE_NEIGHBORHOOD: usize = 3;
+
 #[derive(Parser, Debug)]
 #[clap(
     version = "0.1.5b",
@@ -487,53 +489,40 @@ fn find_walk_preserving_shared_affixes(
         .collect()
 }
 
+
 fn find_affected_nodes(graph: &HashGraph, del_subg: &DeletedSubGraph, v: Handle) -> Vec<Handle> {
-    let mut queue = vec![v];
+    let mut queue: Vec<(usize, Handle)> = vec![(0, v)];
 
-    let mut res = vec![v, v.flip()];
+    let mut visited = FxHashSet::default();
 
-    for _ in 0..2 {
-        res.extend(
-            queue
-                .iter()
-                .cloned()
-                .filter_map(|v| {
-                    if !del_subg.node_deleted(&v) {
-                        Some(
-                            graph
-                                .neighbors(v, Direction::Right)
-                                .filter(move |u| {
-                                    !del_subg.edge_deleted(&v, u) && !del_subg.node_deleted(u)
-                                })
-                                .chain(graph.neighbors(v, Direction::Left).filter_map(move |u| {
-                                    if !del_subg.edge_deleted(&u, &v) && !del_subg.node_deleted(&u)
-                                    {
-                                        Some(u.flip())
-                                    } else {
-                                        None
-                                    }
-                                })),
-                        )
-                    } else {
-                        None
-                    }
-                })
-                .flatten(),
-        );
-        let new_queue: Vec<Handle> = queue
-            .into_iter()
-            .map(|v| {
-                graph
-                    .neighbors(v, Direction::Right)
-                    .filter(move |u| !del_subg.edge_deleted(&v, u) && !del_subg.node_deleted(u))
-            })
-            .flatten()
-            .collect();
-        queue = new_queue;
+    let mut res = Vec::new();
+
+    while !queue.is_empty() {
+        let (d, v) = queue.pop().unwrap();
+        if !del_subg.node_deleted(&v) && !visited.contains(&v.forward()) {
+            visited.insert(v.forward());
+            res.push(v);
+            res.push(v.flip());
+            if d < EXPLORE_NEIGHBORHOOD {
+                queue.extend(
+                    graph
+                        .neighbors(v, Direction::Right)
+                        .chain(graph.neighbors(v, Direction::Left))
+                        .filter_map(|u| {
+                            if !visited.contains(&u) {
+                                Some((d + 1, u.forward()))
+                            } else {
+                                None
+                            }
+                        }),
+                );
+            }
+        }
     }
 
     res
 }
+
 
 fn find_collapsible_blunt_end_pair(
     graph: &HashGraph,
@@ -998,7 +987,8 @@ fn parse_and_transform_paths<W: io::Write, T: OptFields>(
                     .collect::<Vec<String>>()
                     .join(","),
                 path.overlaps
-                    .iter().par_bridge()
+                    .iter()
+                    .par_bridge()
                     .map(|x| match x {
                         None => "*".to_string(),
                         Some(c) => c.to_string(),
