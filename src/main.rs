@@ -657,7 +657,8 @@ fn find_and_collapse_walk_preserving_shared_affixes<'a>(
                 .any(|u| del_subg.node_deleted(u) || cur_modified_nodes.contains(&u.forward()))
             {
                 // push non-deleted parents back on queue
-                queue.extend(affix.parents.iter().filter(|u| !del_subg.node_deleted(u)));
+                queue.extend(affix.parents.iter().filter_map(|u| if !del_subg.node_deleted(u) {
+                    Some(u.flip()) } else { None}));
             } else {
                 affixes.push(affix.clone());
                 if affix
