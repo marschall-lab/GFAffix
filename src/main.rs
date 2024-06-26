@@ -509,7 +509,7 @@ fn find_affected_nodes(graph: &HashGraph, del_subg: &DeletedSubGraph, v: Handle)
                         .neighbors(v, Direction::Right)
                         .chain(graph.neighbors(v, Direction::Left))
                         .filter_map(|u| {
-                            if !visited.contains(&u) {
+                            if !visited.contains(&u.forward()) {
                                 Some((d + 1, u.forward()))
                             } else {
                                 None
