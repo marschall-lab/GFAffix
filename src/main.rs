@@ -645,7 +645,8 @@ fn find_and_collapse_walk_preserving_shared_affixes<'a>(
             .chain(graph.handles().map(|v| v.flip()))
             .collect();
         while !queue.is_empty() {
-            let cur_affixes = find_walk_preserving_shared_affixes(graph, &del_subg, queue);
+            let mut cur_affixes = find_walk_preserving_shared_affixes(graph, &del_subg, queue);
+            cur_affixes.sort_by_cached_key(|x| (-1 * (x.sequence.len() as i64), x.parents.iter().min().unwrap().clone()));
             queue = Vec::new();
             let mut cur_modified_nodes = FxHashSet::default();
             for affix in cur_affixes.iter() {
