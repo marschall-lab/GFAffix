@@ -666,7 +666,8 @@ fn find_and_collapse_walk_preserving_shared_affixes<'a>(
                         }
                     }));
                 } else {
-                    has_changed |= true;
+                    // 1 iteration is enough?
+//                    has_changed |= true;
                     affixes.push(affix.clone());
                     if affix
                         .parents
