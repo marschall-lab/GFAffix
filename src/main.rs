@@ -490,8 +490,7 @@ fn find_walk_preserving_shared_affixes(
 }
 
 fn find_affected_nodes(graph: &HashGraph, del_subg: &DeletedSubGraph, v: Handle) -> Vec<Handle> {
-    let mut queue: Vec<(usize, Handle)> = graph.neighbors(v, Direction::Right).map(|u| (1, u))
-        .chain(graph.neighbors(v, Direction::Left).map(|u| (2, u))).collect();
+    let mut queue: Vec<(usize, Handle)> = vec![(0, v)];
 
     let mut visited = FxHashSet::default();
 
