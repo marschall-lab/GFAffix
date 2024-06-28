@@ -646,7 +646,12 @@ fn find_and_collapse_walk_preserving_shared_affixes<'a>(
             .collect();
         while !queue.is_empty() {
             let mut cur_affixes = find_walk_preserving_shared_affixes(graph, &del_subg, queue);
-            cur_affixes.sort_by_cached_key(|x| (-1 * (x.sequence.len() as i64), x.parents.iter().min().unwrap().clone()));
+            cur_affixes.sort_by_cached_key(|x| {
+                (
+                    -1 * (x.sequence.len() as i64),
+                    x.parents.iter().min().unwrap().clone(),
+                )
+            });
             queue = Vec::new();
             let mut cur_modified_nodes = FxHashSet::default();
             for affix in cur_affixes.iter() {
@@ -668,7 +673,7 @@ fn find_and_collapse_walk_preserving_shared_affixes<'a>(
                     }));
                 } else {
                     // 1 iteration is enough?
-//                    has_changed |= true;
+                    //                    has_changed |= true;
                     affixes.push(affix.clone());
                     if affix
                         .parents
@@ -948,24 +953,47 @@ fn parse_and_transform_paths<W: io::Write, T: OptFields>(
     walks: &FxHashMap<Vec<u8>, Vec<u8>>,
     out: &mut io::BufWriter<W>,
 ) -> Result<(), Box<dyn Error>> {
+
+    let mut out_b : Vec<u8> = Vec::new();
     for path in gfa.paths.iter() {
-        log::debug!("transforming path/walk {}", str::from_utf8(&path.path_name)?);
-        let mut p_out = String::with_capacity(path.iter().count() * 10);
+        log::debug!(
+            "transforming path/walk {}",
+            str::from_utf8(&path.path_name)?
+        );
         if walks.contains_key(&path.path_name[..]) {
+            write!(
+                out,
+                "W\t{}\t",
+                str::from_utf8(walks.get(&path.path_name[..]).unwrap())?
+            )?;
             for (sid, o) in path.iter() {
-                for (vid, d) in transform_node(sid, o, *orig_node_lens.get(&sid).unwrap(), transform) {
-                    p_out.push_str(&format!("{}{}", if d == Direction::Right { '>' } else { '<' }, vid)[..]);
+                for (vid, d) in
+                    transform_node(sid, o, *orig_node_lens.get(&sid).unwrap(), transform)
+                {
+                    out_b.push(if d == Direction::Right {
+                        b'>'
+                    } else {
+                        b'<'
+                    });
+                    out_b.extend(vid.to_string().as_bytes());
                 }
             }
-            writeln!(out, "W\t{}\t{}", str::from_utf8(walks.get(&path.path_name[..]).unwrap())?, p_out)?;
+            out.write(&out_b[..])?;
+            writeln!(out, "")?;
         } else {
+            let mut p_out = String::with_capacity(path.iter().count() * 11);
             for (sid, o) in path.iter() {
-                for (vid, d) in transform_node(sid, o, *orig_node_lens.get(&sid).unwrap(), transform) {
-                    p_out.push_str(&format!("{}{}", vid, if d == Direction::Right { '+' } else { '-' })[..]);
+                for (vid, d) in
+                    transform_node(sid, o, *orig_node_lens.get(&sid).unwrap(), transform)
+                {
+                    p_out.push_str(
+                        &format!("{}{}", vid, if d == Direction::Right { '+' } else { '-' })[..],
+                    );
                 }
             }
             writeln!(out, "P\t{}\t{}\t*", str::from_utf8(&path.path_name)?, p_out)?;
         }
+        out_b.clear();
     }
 
     Ok(())
