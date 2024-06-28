@@ -961,10 +961,6 @@ fn parse_and_transform_paths<W: io::Write, T: OptFields>(
             str::from_utf8(&path.path_name)?
         );
         if walks.contains_key(&path.path_name[..]) {
-            let l = path.iter().count() * 10;
-            if out_b.capacity() < l  {
-                out_b.reserve(l - out_b.capacity());
-            }
             write!(
                 out,
                 "W\t{}\t",
