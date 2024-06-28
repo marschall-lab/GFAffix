@@ -949,46 +949,22 @@ fn parse_and_transform_paths<W: io::Write, T: OptFields>(
     out: &mut io::BufWriter<W>,
 ) -> Result<(), Box<dyn Error>> {
     for path in gfa.paths.iter() {
-        log::debug!("transforming path {}", str::from_utf8(&path.path_name)?);
+        log::debug!("transforming path/walk {}", str::from_utf8(&path.path_name)?);
+        let mut p_out = String::with_capacity(path.iter().count() * 10);
         if walks.contains_key(&path.path_name[..]) {
-            writeln!(
-                out,
-                "W\t{}\t{}",
-                str::from_utf8(walks.get(&path.path_name[..]).unwrap())?,
-                path.iter().par_bridge()
-                    .map(|(sid, o)| {
-                        transform_node(sid, o, *orig_node_lens.get(&sid).unwrap(), transform)
-                            .into_iter()
-                            .map(|(vid, d)| {
-                                format!("{}{}", if d == Direction::Right { '>' } else { '<' }, vid)
-                            }).collect::<Vec<String>>().join("")
-                    }).collect::<Vec<String>>()
-                    .join("")
-            )?;
+            for (sid, o) in path.iter() {
+                for (vid, d) in transform_node(sid, o, *orig_node_lens.get(&sid).unwrap(), transform) {
+                    p_out.push_str(&format!("{}{}", if d == Direction::Right { '>' } else { '<' }, vid)[..]);
+                }
+            }
+            writeln!(out, "W\t{}\t{}", str::from_utf8(walks.get(&path.path_name[..]).unwrap())?, p_out)?;
         } else {
-            writeln!(
-                out,
-                "P\t{}\t{}\t{}",
-                str::from_utf8(&path.path_name)?,
-                path.iter()
-                    .map(|(sid, o)| {
-                        transform_node(sid, o, *orig_node_lens.get(&sid).unwrap(), transform)
-                            .into_iter()
-                            .map(|(vid, d)| {
-                                format!("{}{}", vid, if d == Direction::Right { '+' } else { '-' })
-                            }).collect::<Vec<String>>().join("")
-                    }).collect::<Vec<String>>()
-                    .join(""),
-                path.overlaps
-                    .iter()
-                    .par_bridge()
-                    .map(|x| match x {
-                        None => "*".to_string(),
-                        Some(c) => c.to_string(),
-                    })
-                    .collect::<Vec<String>>()
-                    .join("")
-            )?;
+            for (sid, o) in path.iter() {
+                for (vid, d) in transform_node(sid, o, *orig_node_lens.get(&sid).unwrap(), transform) {
+                    p_out.push_str(&format!("{}{}", vid, if d == Direction::Right { '+' } else { '-' })[..]);
+                }
+            }
+            writeln!(out, "P\t{}\t{}\t*", str::from_utf8(&path.path_name)?, p_out)?;
         }
     }
 
