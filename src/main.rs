@@ -960,6 +960,10 @@ fn parse_and_transform_paths<W: io::Write, T: OptFields>(
             "transforming path/walk {}",
             str::from_utf8(&path.path_name)?
         );
+        let l = path.segment_names.len();
+        if out_b.capacity() < l {
+            out_b.reserve(l - out_b.capacity());
+        }
         if walks.contains_key(&path.path_name[..]) {
             write!(
                 out,
@@ -986,11 +990,17 @@ fn parse_and_transform_paths<W: io::Write, T: OptFields>(
                 for (vid, d) in
                     transform_node(sid, o, *orig_node_lens.get(&sid).unwrap(), transform)
                 {
-                    p_out.push_str(
-                        &format!("{}{}", vid, if d == Direction::Right { '+' } else { '-' })[..],
-                    );
+                    out_b.extend_from_slice(vid.to_string().as_bytes());
+                    out_b.push(if d == Direction::Right {
+                        b'+'
+                    } else {
+                        b'-'
+                    });
+                    out_b.push(b',');
                 }
             }
+            // remove last ","
+            out_b.pop();
             writeln!(out, "P\t{}\t{}\t*", str::from_utf8(&path.path_name)?, p_out)?;
         }
         out_b.clear();
