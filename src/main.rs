@@ -955,16 +955,14 @@ fn parse_and_transform_paths<W: io::Write, T: OptFields>(
                 out,
                 "W\t{}\t{}",
                 str::from_utf8(walks.get(&path.path_name[..]).unwrap())?,
-                path.iter()
+                path.iter().par_bridge()
                     .map(|(sid, o)| {
                         transform_node(sid, o, *orig_node_lens.get(&sid).unwrap(), transform)
                             .into_iter()
                             .map(|(vid, d)| {
                                 format!("{}{}", if d == Direction::Right { '>' } else { '<' }, vid)
-                            })
-                    })
-                    .flatten()
-                    .collect::<Vec<String>>()
+                            }).collect::<Vec<String>>().join("")
+                    }).collect::<Vec<String>>()
                     .join("")
             )?;
         } else {
@@ -978,10 +976,8 @@ fn parse_and_transform_paths<W: io::Write, T: OptFields>(
                             .into_iter()
                             .map(|(vid, d)| {
                                 format!("{}{}", vid, if d == Direction::Right { '+' } else { '-' })
-                            })
-                    })
-                    .flatten()
-                    .collect::<Vec<String>>()
+                            }).collect::<Vec<String>>().join("")
+                    }).collect::<Vec<String>>()
                     .join(""),
                 path.overlaps
                     .iter()
