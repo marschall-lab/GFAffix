@@ -13,7 +13,7 @@ handlegraph = "0.7.0-alpha.9"
 indexmap    = "2.2.6"
 rayon       = "1"
 regex       = "1"
-rustc-hash  = "1"
+rustc-hash  = "2"
 
 # Logging and error management
 log        = "0.4"
