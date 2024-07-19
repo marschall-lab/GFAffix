@@ -292,10 +292,10 @@ fn collapse(
         };
 
         // count don't collapse nodes
-        let isDontCollapse = event_tracker
+        let is_dont_collapse = event_tracker
             .dont_collapse_nodes
             .contains(&(node_id, v_len));
-        if isDontCollapse {
+        if is_dont_collapse {
             n_dont_collapse_nodes += 1;
         }
         if v_len > prefix_len {
@@ -355,6 +355,25 @@ fn collapse(
             // non-blunt nodes (suffix is non-empty) need to be recorded
             let spn = shared_prefix_node.unwrap();
             original_edges.push((v2tuple(graph, &spn), vec![v2tuple(graph, &u)]));
+            if is_dont_collapse {
+                let last = original_edges.last().unwrap();
+                log::debug!(
+                    "registering >{}:{} as dont-collapse-node",
+                    last.0 .0,
+                    last.0 .2
+                );
+                event_tracker
+                    .dont_collapse_nodes
+                    .insert((last.0 .0, last.0 .2));
+                log::debug!(
+                    "registering >{}:{} as dont-collapse-node",
+                    last.1[0].0,
+                    last.1[0].2
+                );
+                event_tracker
+                    .dont_collapse_nodes
+                    .insert((last.1[0].0, last.1[0].2));
+            }
         } else {
             splitted_node_pairs.push((node_id, node_orient, v_len, *v, None));
             log::debug!(
@@ -403,6 +422,12 @@ fn collapse(
                     // mark redundant node as deleted
                     log::debug!("flag {} as deleted", v2str(v));
                     del_subg.add_node(*v);
+
+                    if is_dont_collapse {
+                        let wid = w.unpack_number() as usize;
+                        log::debug!("registering >{}:{} as dont-collapse-node", wid, prefix_len);
+                        event_tracker.dont_collapse_nodes.insert((wid, prefix_len));
+                    }
                 }
             };
         }
@@ -626,7 +651,7 @@ fn find_and_collapse_blunt_ends(
 
 fn find_and_collapse_walk_preserving_shared_affixes<'a>(
     graph: &mut HashGraph,
-    dont_collapse_nodes: &'a FxHashSet<(usize, usize)>,
+    dont_collapse_nodes: &'a mut FxHashSet<(usize, usize)>,
 ) -> (
     Vec<AffixSubgraph>,
     DeletedSubGraph,
@@ -953,8 +978,7 @@ fn parse_and_transform_paths<W: io::Write, T: OptFields>(
     walks: &FxHashMap<Vec<u8>, Vec<u8>>,
     out: &mut io::BufWriter<W>,
 ) -> Result<(), Box<dyn Error>> {
-
-    let mut out_b : Vec<u8> = Vec::new();
+    let mut out_b: Vec<u8> = Vec::new();
     for path in gfa.paths.iter() {
         log::debug!(
             "transforming path/walk {}",
@@ -974,11 +998,7 @@ fn parse_and_transform_paths<W: io::Write, T: OptFields>(
                 for (vid, d) in
                     transform_node(sid, o, *orig_node_lens.get(&sid).unwrap(), transform)
                 {
-                    out_b.push(if d == Direction::Right {
-                        b'>'
-                    } else {
-                        b'<'
-                    });
+                    out_b.push(if d == Direction::Right { b'>' } else { b'<' });
                     out_b.extend_from_slice(vid.to_string().as_bytes());
                 }
             }
@@ -991,11 +1011,7 @@ fn parse_and_transform_paths<W: io::Write, T: OptFields>(
                     transform_node(sid, o, *orig_node_lens.get(&sid).unwrap(), transform)
                 {
                     out_b.extend_from_slice(vid.to_string().as_bytes());
-                    out_b.push(if d == Direction::Right {
-                        b'+'
-                    } else {
-                        b'-'
-                    });
+                    out_b.push(if d == Direction::Right { b'+' } else { b'-' });
                     out_b.push(b',');
                 }
             }
@@ -1221,7 +1237,7 @@ fn main() -> Result<(), io::Error> {
     )?;
 
     let (affixes, mut del_subg, mut event_tracker) =
-        find_and_collapse_walk_preserving_shared_affixes(&mut graph, &dont_collapse_nodes);
+        find_and_collapse_walk_preserving_shared_affixes(&mut graph, &mut dont_collapse_nodes);
 
     log::info!("identifying walk-preserving blunt ends");
     find_and_collapse_blunt_ends(&mut graph, &mut del_subg, &mut event_tracker);
@@ -1230,7 +1246,7 @@ fn main() -> Result<(), io::Error> {
         print(&affix, &mut out)?;
     }
 
-    if !dont_collapse_nodes.is_empty() {
+    if !event_tracker.dont_collapse_nodes.is_empty() {
         log::info!("de-collapse no-collapse handles and update transformation table");
         let copies = event_tracker.decollapse(&mut graph, &mut del_subg);
         //        let old_graph = HashGraph::from_gfa(&gfa);

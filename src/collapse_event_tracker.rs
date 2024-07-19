@@ -7,22 +7,24 @@ use handlegraph::{
     mutablehandlegraph::AdditiveHandleGraph,
 };
 use indexmap::IndexMap;
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::{FxBuildHasher, FxHashMap, FxHashSet};
+
+type FxIndexMap<K, V> = IndexMap<K, V, FxBuildHasher>;
 
 /* project use */
 use crate::deleted_sub_graph::DeletedSubGraph;
 use crate::{v2str, v2tuple};
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct CollapseEventTracker<'a> {
     // tranform from (node_id, node_len) -> [(node_id, node_orient, node_len), ..]
     //                ^ keys are always forward oriented
-    pub transform: FxHashMap<(usize, usize), Vec<(usize, Direction, usize)>>,
+    pub transform: FxIndexMap<(usize, usize), Vec<(usize, Direction, usize)>>,
     // if there are non-collapse nodes that could be nevertheless collapsed (and then must be
     // de-collapsed in a subsequent step, we need to know these nodes, also those that are
     // constructed during de-collapse. If they are eventually
     // collapsed, we record their incident edges for the decollapse procedure
-    pub dont_collapse_nodes: &'a FxHashSet<(usize, usize)>,
+    pub dont_collapse_nodes: &'a mut FxHashSet<(usize, usize)>,
     //   key: original node--because trait struct Direction does not support the Hash trait, we
     //        need to store the orientation as boolean, indicating whether the node is reversed
     //        (=>true)
@@ -53,17 +55,29 @@ impl<'a> CollapseEventTracker<'a> {
             "storing right-side edges of to-be-collapsed siblings {}",
             original_blunt_edges
                 .iter()
-                .map(|(v, _)| format!(
-                    "{}{}:{}",
+                .map(|(v, es)| format!(
+                    "{}{}:{}--{{{}}}",
                     match v.1 {
                         Direction::Left => "<",
                         Direction::Right => ">",
                     },
                     v.0,
-                    v.2
+                    v.2,
+                    es.iter()
+                        .map(|u| format!(
+                            "{}{}:{}",
+                            match u.1 {
+                                Direction::Left => "<",
+                                Direction::Right => ">",
+                            },
+                            u.0,
+                            u.2
+                        ))
+                        .collect::<Vec<String>>()
+                        .join(",")
                 ))
                 .collect::<Vec<String>>()
-                .join(",")
+                .join(", ")
         );
         // TODO describe what you do here
         if !self.dont_collapse_nodes.is_empty() && !original_blunt_edges.is_empty() {
@@ -101,60 +115,64 @@ impl<'a> CollapseEventTracker<'a> {
         }
 
         for (node_id, node_orient, node_len, _node_handle, suffix) in splitted_node_pairs {
-            // do not report transformations of the same node to itself or to its reverse
-            if node_id != &prefix_id || node_len != &prefix_len {
-                // record transformation of node, even if none took place (which is the case if node v
-                // equals the dedicated shared prefix node
-
-                let mut replacement: Vec<(usize, Direction, usize)> =
-                    vec![(prefix_id, prefix_orient, prefix_len)];
-                if let Some((v, vlen)) = suffix {
-                    replacement.push((
-                        v.unpack_number() as usize,
-                        if v.is_reverse() {
-                            Direction::Left
-                        } else {
-                            Direction::Right
-                        },
-                        *vlen,
-                    ));
-                    self.modified_nodes
-                        .insert((v.unpack_number() as usize, *vlen));
-                }
-
-                // orient transformation
-                // important notice:
-                // - handle_graph::split_handle() works only in forward direction
-                // - the first node of the split pair an will always be the node itself (again in
-                //   forward direction)
-                if *node_orient == Direction::Left {
-                    replacement.reverse();
-                    for r in replacement.iter_mut() {
-                        r.1 = if r.1 == Direction::Left {
-                            Direction::Right
-                        } else {
-                            Direction::Left
-                        };
-                    }
-                }
-                log::debug!(
-                    "new replacement rule {}:{} -> {}",
-                    node_id,
-                    node_len,
-                    replacement
-                        .iter()
-                        .map(|(rid, ro, rlen)| format!(
-                            "{}{}:{}",
-                            if *ro == Direction::Left { '<' } else { '>' },
-                            rid,
-                            rlen
-                        ))
-                        .collect::<Vec<String>>()
-                        .join("")
-                );
-                self.transform
-                    .insert((*node_id, *node_len), replacement.clone());
+            // record transformation of node, even if none took place (which is the case if node v
+            // equals the dedicated shared prefix node, but make sure it's then in synced
+            // orientation
+            let mut replacement: Vec<(usize, Direction, usize)> = vec![(
+                prefix_id,
+                if node_id == &prefix_id && node_len == &prefix_len {
+                    *node_orient
+                } else {
+                    prefix_orient
+                },
+                prefix_len,
+            )];
+            if let Some((v, vlen)) = suffix {
+                replacement.push((
+                    v.unpack_number() as usize,
+                    if v.is_reverse() {
+                        Direction::Left
+                    } else {
+                        Direction::Right
+                    },
+                    *vlen,
+                ));
+                self.modified_nodes
+                    .insert((v.unpack_number() as usize, *vlen));
             }
+
+            // orient transformation
+            // important notice:
+            // - handle_graph::split_handle() works only in forward direction
+            // - the first node of the split pair an will always be the node itself (again in
+            //   forward direction)
+            if *node_orient == Direction::Left {
+                replacement.reverse();
+                for r in replacement.iter_mut() {
+                    r.1 = if r.1 == Direction::Left {
+                        Direction::Right
+                    } else {
+                        Direction::Left
+                    };
+                }
+            }
+            log::debug!(
+                "new replacement rule {}:{} -> {}",
+                node_id,
+                node_len,
+                replacement
+                    .iter()
+                    .map(|(rid, ro, rlen)| format!(
+                        "{}{}:{}",
+                        if *ro == Direction::Left { '<' } else { '>' },
+                        rid,
+                        rlen
+                    ))
+                    .collect::<Vec<String>>()
+                    .join("")
+            );
+            self.transform
+                .insert((*node_id, *node_len), replacement.clone());
         }
     }
 
@@ -233,29 +251,52 @@ impl<'a> CollapseEventTracker<'a> {
         res
     }
 
-    pub fn get_collapsed_nodes(&self) -> IndexMap<(usize, usize), Vec<(usize, usize)>> {
-        // returns the collapsed node and the rules that are associated to it
-        let mut locus_tags: IndexMap<(usize, usize), Vec<(usize, usize)>> = IndexMap::new();
-        for v in self.dont_collapse_nodes.iter() {
-            if let Some(t_chain) = self.transform.get(v) {
+    pub fn get_collapsed_nodes(&self, graph: &HashGraph, del_subg: &DeletedSubGraph) -> Vec<((usize, usize), (usize,
+            usize))> {
+        // returns a list of (duplicated node, rule)-tuples that are sorted in the order in which the de-collapse must be carried out
+        let mut locus_tags: IndexMap<(usize, usize), Vec<(usize, usize, usize)>> = IndexMap::new();
+
+        for (i, (v, t_chain)) in self.transform.iter().enumerate() {
+            if self.dont_collapse_nodes.contains(v) {
                 for u in t_chain.iter() {
-                    locus_tags
-                        .entry((u.0, u.2))
-                        .or_insert_with(|| Vec::new())
-                        .push(*v);
+                    let u_handle = Handle::pack(u.0, false);
+
+                    // only decollapse nodes that are not deleted
+                    if graph.node_len(u_handle) == u.2 && ! del_subg.node_deleted(&u_handle) {
+                        locus_tags
+                            .entry((u.0, u.2))
+                            .or_insert_with(|| Vec::new())
+                            .push((v.0, v.1, i));
+                    }
                 }
-            } else {
-                locus_tags.entry(*v).or_insert_with(|| Vec::new()).push(*v);
             }
         }
 
-        let mut res: IndexMap<(usize, usize), Vec<(usize, usize)>> = IndexMap::new();
+        let mut res: Vec<(usize, (usize, usize), (usize, usize))> = Vec::new();
         for (key, vals) in locus_tags.into_iter() {
             if vals.len() > 1 {
-                res.insert(key, vals);
+                log::debug!(
+                    "node >{}:{} shares {} collapsed reference locations: {}",
+                    key.0,
+                    key.1,
+                    vals.len(),
+                    vals.iter()
+                        .map(|x| format!(">{}:{}", x.0, x.1))
+                        .collect::<Vec<String>>()
+                        .join(", ")
+                );
+                // decollapse all but one: skip first entry, corresponding to the oldest
+                // transformation rule
+                res.extend(
+                    vals[1..]
+                        .into_iter()
+                        .map(|(uid, ulen, i)| (*i, key, (*uid, *ulen))),
+                );
             }
         }
-        res
+        res.sort_by_key(|x| x.0);
+        res.reverse();
+        res.into_iter().map(|(_, u, v)| (u, v)).collect()
     }
 
     pub fn decollapse(
@@ -263,193 +304,149 @@ impl<'a> CollapseEventTracker<'a> {
         graph: &mut HashGraph,
         del_subg: &mut DeletedSubGraph,
     ) -> Vec<usize> {
-        //        // first of all, remove unnecessary transformation rules
-        //        let keys = self
-        //            .transform
-        //            .keys()
-        //            .map(|(xid, xlen)| (*xid, *xlen))
-        //            .collect::<Vec<(usize, usize)>>();
-        //        for (vid, vlen) in keys {
-        //            let rule = self.transform.get(&(vid, vlen)).unwrap();
-        //            if rule.len() == 1 && rule[0] == (vid, Direction::Right, vlen) {
-        //                self.transform.remove(&(vid, vlen));
-        //            }
-        //        }
-
-        //        let mut collapses: FxHashSet<&[&(usize, usize)]> = trans_rev.values().filter_map(|x| { if x.len() > 2 { Some(&x[..])} else { None }}).collect();
-        let nodes2rule = self.get_collapsed_nodes();
-        log::debug!("{:?}", nodes2rule);
+        let node2rule = self.get_collapsed_nodes(graph, del_subg);
         let mut decollapse_count = 0;
-        for ((vid, vlen), rules) in nodes2rule.into_iter() {
-            if rules.len() > 1 {
-                log::debug!(
-                    "node >{}:{} shares {} collapsed reference locations: {}",
-                    vid,
-                    vlen,
-                    rules.len(),
-                    rules
-                        .iter()
-                        .map(|x| format!(">{}:{}", x.0, x.1))
-                        .collect::<Vec<String>>()
-                        .join(", ")
-                );
+        let mut decollapsed_blunt_siblings: FxHashMap<(usize, usize), FxHashSet<usize>> =
+            FxHashMap::default();
+        for ((vid, vlen), u) in node2rule.into_iter() {
+            match self.transform[&u][..] {
+                [(wid, worient, wlen)] => {
+                    log::debug!(
+                        "decollapsing transform >{}:{} -> {}{}:{}",
+                        u.0,
+                        u.1,
+                        match worient {
+                            Direction::Right => ">",
+                            Direction::Left => "<",
+                        },
+                        wid,
+                        wlen,
+                    );
+
+                    let y = self.decollapse_blunt_node(
+                        (wid, worient, wlen),
+                        u,
+                        &mut decollapsed_blunt_siblings
+                            .entry((vid, vlen))
+                            .or_insert_with(|| FxHashSet::default()),
+                        graph,
+                        del_subg,
+                    );
+                    // update
+                    log::debug!(
+                        "updating transform to >{}:{} -> {}:{}",
+                        u.0,
+                        u.1,
+                        v2str(&y),
+                        wlen
+                    );
+                    self.transform.insert(
+                        u,
+                        vec![
+                            // the new created node has always right direction
+                            (y.unpack_number() as usize, Direction::Right, wlen),
+                        ],
+                    );
+                }
+                [(wid, worient, wlen), (xid, xorient, xlen)] => {
+                    log::debug!(
+                        "decollapsing transform >{}:{} -> {}{}:{}{}{}:{}",
+                        u.0,
+                        u.1,
+                        match worient {
+                            Direction::Right => ">",
+                            Direction::Left => "<",
+                        },
+                        wid,
+                        wlen,
+                        match xorient {
+                            Direction::Right => ">",
+                            Direction::Left => "<",
+                        },
+                        xid,
+                        xlen
+                    );
+
+                    // observe that duplicated nodes are always *prefix*, in the sense that
+                    // relative to their orientation, to their left is the parent node
+                    // whose children shared some prefixes, and to their right comes the
+                    // un-shared suffix
+                    if wid == vid && wlen == vlen {
+                        let y = self.decollapse_prefix(
+                            (wid, worient, wlen),
+                            (xid, xorient, xlen),
+                            graph,
+                            del_subg,
+                        );
+                        // update transformation table to de-duplicate rule
+                        log::debug!(
+                            "updating transform to >{}:{} -> {}:{}{}{}:{} ",
+                            u.0,
+                            u.1,
+                            v2str(&y),
+                            wlen,
+                            match xorient {
+                                Direction::Right => ">",
+                                Direction::Left => "<",
+                            },
+                            xid,
+                            xlen
+                        );
+                        self.transform.insert(
+                            u,
+                            vec![
+                                (y.unpack_number() as usize, Direction::Right, wlen),
+                                (xid, xorient, xlen),
+                            ],
+                        );
+                    } else {
+                        // either the rule is in forward direction (then it is covered by
+                        // the if-case), or it is in reverse direction (else)
+                        let y = self.decollapse_prefix(
+                            (
+                                xid,
+                                match xorient {
+                                    Direction::Left => Direction::Right,
+                                    Direction::Right => Direction::Left,
+                                },
+                                xlen,
+                            ),
+                            (
+                                wid,
+                                match worient {
+                                    Direction::Left => Direction::Right,
+                                    Direction::Right => Direction::Left,
+                                },
+                                wlen,
+                            ),
+                            graph,
+                            del_subg,
+                        );
+                        // update transformation table to de-duplicate rule
+                        log::debug!(
+                            "updating transform to >{}:{}-> {}{}:{}{}:{}",
+                            u.0,
+                            u.1,
+                            match worient {
+                                Direction::Right => ">",
+                                Direction::Left => "<",
+                            },
+                            wid,
+                            wlen,
+                            v2str(&y.flip()),
+                            xlen
+                        );
+                        self.transform.insert(
+                            u,
+                            vec![
+                                (wid, worient, wlen),
+                                (y.unpack_number() as usize, Direction::Left, xlen),
+                            ],
+                        );
+                    }
+                }
+                [] | [_, _, _, ..] => unreachable!(),
             }
-
-            let mut decollapsed_blunt_siblings: HashSet<usize> = HashSet::default();
-
-            let mut rules = rules.clone();
-            // we want to tranform prefix rules first, then blunt nodes if we have to, and
-            // definitely not self-to-self mappings (not contained in transform; will be assigned 0
-            // by default)
-            //            rules.sort_by_key(|u| self.transform.get(u).map(|x| x.len()).unwrap_or_default());
-            //            rules.reverse();
-            //            for u in &rules[..rules.len() - 1] {
-            //                let mut queue = Vec::new();
-            //                que
-            //                while ! queue.is_empty() {
-            //                decollapse_count += 1;
-            //                match self
-            //                    .transform
-            //                    .get(u)
-            //                    .get_or_insert(&vec![(u.0, Direction::Right, u.1)])[..]
-            //                {
-            //                    [(wid, worient, wlen)] => {
-            //                        log::debug!(
-            //                            "decollapsing transform >{}:{} -> {}{}:{}",
-            //                            u.0,
-            //                            u.1,
-            //                            match worient {
-            //                                Direction::Right => ">",
-            //                                Direction::Left => "<",
-            //                            },
-            //                            wid,
-            //                            wlen,
-            //                        );
-            //
-            //                        let y = self.decollapse_blunt_node(
-            //                            (wid, worient, wlen),
-            //                            *u,
-            //                            &mut decollapsed_blunt_siblings,
-            //                            graph,
-            //                            del_subg,
-            //                        );
-            //                        // update
-            //                        log::debug!(
-            //                            "updating transform to >{}:{} -> {}:{}",
-            //                            u.0,
-            //                            u.1,
-            //                            v2str(&y),
-            //                            wlen
-            //                        );
-            //                        self.transform.insert(
-            //                            *u,
-            //                            vec![
-            //                                // the new created node has always right direction
-            //                                (y.unpack_number() as usize, Direction::Right, wlen),
-            //                            ],
-            //                        );
-            //                    }
-            //                    [(wid, worient, wlen), (xid, xorient, xlen)] => {
-            //                        log::debug!(
-            //                            "decollapsing transform >{}:{} -> {}{}:{}{}{}:{}",
-            //                            u.0,
-            //                            u.1,
-            //                            match worient {
-            //                                Direction::Right => ">",
-            //                                Direction::Left => "<",
-            //                            },
-            //                            wid,
-            //                            wlen,
-            //                            match xorient {
-            //                                Direction::Right => ">",
-            //                                Direction::Left => "<",
-            //                            },
-            //                            xid,
-            //                            xlen
-            //                        );
-            //
-            //                        // observe that duplicated nodes are always *prefix*, in the sense that
-            //                        // relative to their orientation, to their left is the parent node
-            //                        // whose children shared some prefixes, and to their right comes the
-            //                        // un-shared suffix
-            //                        if wid == vid && wlen == vlen {
-            //                            let y = self.decollapse_prefix(
-            //                                (wid, worient, wlen),
-            //                                (xid, xorient, xlen),
-            //                                graph,
-            //                                del_subg,
-            //                            );
-            //                            // update transformation table to de-duplicate rule
-            //                            log::debug!(
-            //                                "updating transform to >{}:{} -> {}:{}{}{}:{} ",
-            //                                u.0,
-            //                                u.1,
-            //                                v2str(&y),
-            //                                wlen,
-            //                                match xorient {
-            //                                    Direction::Right => ">",
-            //                                    Direction::Left => "<",
-            //                                },
-            //                                xid,
-            //                                xlen
-            //                            );
-            //                            self.transform.insert(
-            //                                *u,
-            //                                vec![
-            //                                    (y.unpack_number() as usize, Direction::Right, wlen),
-            //                                    (xid, xorient, xlen),
-            //                                ],
-            //                            );
-            //                        } else {
-            //                            // either the rule is in forward direction (then it is covered by
-            //                            // the if-case), or it is in reverse direction (else)
-            //                            let y = self.decollapse_prefix(
-            //                                (
-            //                                    xid,
-            //                                    match xorient {
-            //                                        Direction::Left => Direction::Right,
-            //                                        Direction::Right => Direction::Left,
-            //                                    },
-            //                                    xlen,
-            //                                ),
-            //                                (
-            //                                    wid,
-            //                                    match worient {
-            //                                        Direction::Left => Direction::Right,
-            //                                        Direction::Right => Direction::Left,
-            //                                    },
-            //                                    wlen,
-            //                                ),
-            //                                graph,
-            //                                del_subg,
-            //                            );
-            //                            // update transformation table to de-duplicate rule
-            //                            log::debug!(
-            //                                "updating transform to >{}:{}-> {}{}:{}{}:{}",
-            //                                u.0,
-            //                                u.1,
-            //                                match worient {
-            //                                    Direction::Right => ">",
-            //                                    Direction::Left => "<",
-            //                                },
-            //                                wid,
-            //                                wlen,
-            //                                v2str(&y.flip()),
-            //                                xlen
-            //                            );
-            //                            self.transform.insert(
-            //                                *u,
-            //                                vec![
-            //                                    (wid, worient, wlen),
-            //                                    (y.unpack_number() as usize, Direction::Left, xlen),
-            //                                ],
-            //                            );
-            //                        }
-            //                    }
-            //                    [] | [_, _, _, ..] => unreachable!(),
-            //                }
-            //                }
-            //            }
         }
 
         log::info!("decollapsed {} nodes", decollapse_count);
@@ -492,16 +489,6 @@ impl<'a> CollapseEventTracker<'a> {
             }
         }
 
-        //        let uorient_flip = match uorient { Direction::Left => Direction::Right, Direction::Right => Direction::Left };
-        //        if let Some(group_id) = self.dont_collapse_siblings_group.get((uid, uorient_flip, ulen)) {
-        //            for (wid, worient, wlen) in self.dont_collapse_siblings_members[group_id].iter() {
-        //                if wid == uid && uorient_flip == worient && wlen == ulen {
-        //                    for (yid, yorient, ylen) in dont_collapse_edges(
-        //                }
-        //            }
-        //        }
-        //        for x in graph.neighbors(u, Direction::Left).collect::<Vec<Handle>>() {
-        // there is only one right-incident edge that needs to be created
         log::debug!(
             "creating duplicate {}{} of edge {}{}",
             v2str(&w),
@@ -515,12 +502,6 @@ impl<'a> CollapseEventTracker<'a> {
         log::debug!("flagging edge {}{} as deleted", v2str(&u), v2str(&v),);
         del_subg.add_edge(Edge::edge_handle(u, v));
 
-        // duplicate delete flags
-        if del_subg.node_deleted(&u) {
-            del_subg.add_node(w);
-            del_subg.add_edge(Edge::edge_handle(w, v));
-        }
-
         w
     }
 
@@ -528,7 +509,7 @@ impl<'a> CollapseEventTracker<'a> {
         &self,
         v: (usize, Direction, usize),
         u: (usize, usize),
-        decollapsed_blunt_siblings: &mut HashSet<usize>,
+        decollapsed_blunt_siblings: &mut FxHashSet<usize>,
         graph: &mut HashGraph,
         del_subg: &mut DeletedSubGraph,
     ) -> Handle {
@@ -541,14 +522,15 @@ impl<'a> CollapseEventTracker<'a> {
 
         assert!(
             xlen == ulen,
-            "Length ({}) of decollapsed node {} does not match original node {} (length {})",
+            "length ({}) of decollapsed node {} does not match original node {} (length {})",
             xlen,
             v2str(&x),
             v2str(&u),
             ulen
         );
 
-        for uorient in [Direction::Right, Direction::Left] {
+        let mut recovered_sides = [false, false];
+        for (s, uorient) in [(0, Direction::Right), (1, Direction::Left)] {
             // 1. left direction is processed last; flip orientation of decollapsed node to match that of the
             //    original
             if uorient == Direction::Left {
@@ -559,6 +541,8 @@ impl<'a> CollapseEventTracker<'a> {
                 self.dont_collapse_siblings_group
                     .get(&(uid, uorient == Direction::Left, ulen))
             {
+                recovered_sides[s] |= true;
+
                 let mut keep_neighbors: HashSet<Handle> = HashSet::default();
                 for (i, s) in self.dont_collapse_siblings_members[*group_id]
                     .iter()
@@ -596,19 +580,33 @@ impl<'a> CollapseEventTracker<'a> {
                             decollapsed_blunt_siblings.insert(i);
                         }
                     } else if !decollapsed_blunt_siblings.contains(&i) {
-                        keep_neighbors.extend(
-                            self.dont_collapse_edges[&(s.0, s.1 == Direction::Left, s.2)]
+                        let neighbors: Vec<Handle> = self.dont_collapse_edges
+                            [&(s.0, s.1 == Direction::Left, s.2)]
+                            .iter()
+                            .map(|(yid, yorient, ylen)| {
+                                let (yid, yorient, ylen) = self.expand(*yid, *yorient, *ylen)[0];
+                                // this is about *keeping* edges, so if the neighboring edge
+                                // points back to the original node, it's just fine
+                                Handle::pack(yid, yorient == Direction::Left)
+                            })
+                            .collect();
+
+                        log::debug!(
+                            "keeping edges {} at original node",
+                            neighbors
                                 .iter()
-                                .map(|(yid, yorient, _)| {
-                                    Handle::pack(*yid, *yorient == Direction::Left)
-                                }),
+                                .map(v2str)
+                                .collect::<Vec<String>>()
+                                .join(",")
                         );
+
+                        keep_neighbors.extend(neighbors);
                     }
                 }
 
                 // observe that v as already been flipped, so we are looking at the right(!) direction
                 for w in graph.neighbors(v, Direction::Right) {
-                    if !keep_neighbors.contains(&w) {
+                    if !keep_neighbors.contains(&w) && !del_subg.node_deleted(&w) {
                         log::debug!(
                             "flagging edge {}{} as deleted during decollapse of node {}",
                             v2str(&v),
@@ -621,6 +619,31 @@ impl<'a> CollapseEventTracker<'a> {
             }
         }
 
+        // recover other side
+        for is_recovered in recovered_sides {
+            if is_recovered {
+                // observe that x is already flipped in second iteration of previous loop
+                for w in graph
+                    .neighbors(v, Direction::Right)
+                    .collect::<Vec<Handle>>()
+                {
+                    if !del_subg.node_deleted(&w) {
+                        log::debug!(
+                            "recovering parental edge {}{}",
+                            v2str(&w.flip()),
+                            v2str(&x.flip()),
+                        );
+                        let e = Edge::edge_handle(x, w);
+                        if !graph.has_edge(x, w) {
+                            graph.create_edge(e);
+                        }
+                    }
+                }
+            }
+            v = v.flip();
+            x = x.flip();
+        }
+
         // duplicate delete flags
         if del_subg.node_deleted(&v) {
             del_subg.add_node(x);
@@ -628,9 +651,9 @@ impl<'a> CollapseEventTracker<'a> {
         x
     }
 
-    pub fn new(dont_collapse_nodes: &'a FxHashSet<(usize, usize)>) -> Self {
+    pub fn new(dont_collapse_nodes: &'a mut FxHashSet<(usize, usize)>) -> Self {
         CollapseEventTracker {
-            transform: FxHashMap::default(),
+            transform: FxIndexMap::default(),
             dont_collapse_nodes: dont_collapse_nodes,
             dont_collapse_edges: FxHashMap::default(),
             dont_collapse_siblings_group: FxHashMap::default(),
@@ -642,32 +665,32 @@ impl<'a> CollapseEventTracker<'a> {
         }
     }
 
-    pub fn merge(event_trackers: Vec<Self>) -> Self {
-        assert!(
-            event_trackers.len() > 0,
-            "assumed non-empty list of event trackers"
-        );
-        let mut res =
-            CollapseEventTracker::new(event_trackers.first().unwrap().dont_collapse_nodes);
-
-        for x in event_trackers {
-            assert!(
-                x.transform.keys().all(|x| !res.transform.contains_key(x)),
-                "assumed transformations are disjoint"
-            );
-            res.transform.extend(x.transform.into_iter());
-            res.dont_collapse_edges
-                .extend(x.dont_collapse_edges.into_iter());
-            res.dont_collapse_siblings_group
-                .extend(x.dont_collapse_siblings_group.into_iter());
-            res.dont_collapse_siblings_members
-                .extend(x.dont_collapse_siblings_members.into_iter());
-            res.overlapping_events += x.overlapping_events;
-            res.bubbles += x.bubbles;
-            res.events += x.events;
-            res.modified_nodes.extend(x.modified_nodes.into_iter());
-        }
-
-        res
-    }
+    //    pub fn merge(event_trackers: Vec<Self>) -> Self {
+    //        assert!(
+    //            event_trackers.len() > 0,
+    //            "assumed non-empty list of event trackers"
+    //        );
+    //        let mut res =
+    //            CollapseEventTracker::new(event_trackers.first().unwrap().dont_collapse_nodes);
+    //
+    //        for x in event_trackers {
+    //            assert!(
+    //                x.transform.keys().all(|x| !res.transform.contains_key(x)),
+    //                "assumed transformations are disjoint"
+    //            );
+    //            res.transform.extend(x.transform.into_iter());
+    //            res.dont_collapse_edges
+    //                .extend(x.dont_collapse_edges.into_iter());
+    //            res.dont_collapse_siblings_group
+    //                .extend(x.dont_collapse_siblings_group.into_iter());
+    //            res.dont_collapse_siblings_members
+    //                .extend(x.dont_collapse_siblings_members.into_iter());
+    //            res.overlapping_events += x.overlapping_events;
+    //            res.bubbles += x.bubbles;
+    //            res.events += x.events;
+    //            res.modified_nodes.extend(x.modified_nodes.into_iter());
+    //        }
+    //
+    //        res
+    //    }
 }
