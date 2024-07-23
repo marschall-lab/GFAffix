@@ -6,6 +6,7 @@ use std::io;
 use std::io::prelude::*;
 use std::iter::{repeat, FromIterator};
 use std::str::{self, FromStr};
+use std::sync::{Arc, Mutex};
 
 /* crate use */
 use clap::Parser;
@@ -21,10 +22,10 @@ use handlegraph::{
     mutablehandlegraph::{AdditiveHandleGraph, MutableHandles},
     pathhandlegraph::GraphPathNames,
 };
+use indexmap::{IndexMap, IndexSet};
 use rayon::prelude::*;
 use regex::Regex;
-use rustc_hash::{FxHashMap, FxHashSet};
-use std::sync::{Arc, Mutex};
+use rustc_hash::{FxBuildHasher, FxHashMap, FxHashSet};
 
 /* mod declaration */
 mod collapse_event_tracker;
@@ -39,6 +40,8 @@ mod decomposition;
 use decomposition::*;
 
 const EXPLORE_NEIGHBORHOOD: usize = 2;
+type FxIndexMap<K, V> = IndexMap<K, V, FxBuildHasher>;
+type FxIndexSet<V> = IndexSet<V, FxBuildHasher>;
 
 #[derive(Parser, Debug)]
 #[clap(
@@ -651,7 +654,7 @@ fn find_and_collapse_blunt_ends(
 
 fn find_and_collapse_walk_preserving_shared_affixes<'a>(
     graph: &mut HashGraph,
-    dont_collapse_nodes: &'a mut FxHashSet<(usize, usize)>,
+    dont_collapse_nodes: &'a mut FxIndexSet<(usize, usize)>,
 ) -> (
     Vec<AffixSubgraph>,
     DeletedSubGraph,
@@ -1005,7 +1008,6 @@ fn parse_and_transform_paths<W: io::Write, T: OptFields>(
             out.write(&out_b[..])?;
             writeln!(out, "")?;
         } else {
-            let mut p_out = String::with_capacity(path.iter().count() * 11);
             for (sid, o) in path.iter() {
                 for (vid, d) in
                     transform_node(sid, o, *orig_node_lens.get(&sid).unwrap(), transform)
@@ -1017,7 +1019,9 @@ fn parse_and_transform_paths<W: io::Write, T: OptFields>(
             }
             // remove last ","
             out_b.pop();
-            writeln!(out, "P\t{}\t{}\t*", str::from_utf8(&path.path_name)?, p_out)?;
+            write!(out, "P\t{}\t", str::from_utf8(&path.path_name)?)?;
+            out.write(&out_b[..])?;
+            writeln!(out, "")?;
         }
         out_b.clear();
     }
@@ -1202,7 +1206,7 @@ fn main() -> Result<(), io::Error> {
         node_lens.insert(v.unpack_number() as usize, graph.node_len(v));
     }
 
-    let mut dont_collapse_nodes: FxHashSet<(usize, usize)> = FxHashSet::default();
+    let mut dont_collapse_nodes: FxIndexSet<(usize, usize)> = FxIndexSet::default();
     if !params.no_collapse_path.trim().is_empty() {
         let re = Regex::new(&params.no_collapse_path).unwrap();
         for path in paths.iter() {

@@ -6,14 +6,11 @@ use handlegraph::{
     hashgraph::HashGraph,
     mutablehandlegraph::AdditiveHandleGraph,
 };
-use indexmap::IndexMap;
-use rustc_hash::{FxBuildHasher, FxHashMap, FxHashSet};
-
-type FxIndexMap<K, V> = IndexMap<K, V, FxBuildHasher>;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 /* project use */
 use crate::deleted_sub_graph::DeletedSubGraph;
-use crate::{v2str, v2tuple};
+use crate::{v2str, v2tuple, FxIndexMap, FxIndexSet};
 
 #[derive(Debug)]
 pub struct CollapseEventTracker<'a> {
@@ -24,7 +21,8 @@ pub struct CollapseEventTracker<'a> {
     // de-collapsed in a subsequent step, we need to know these nodes, also those that are
     // constructed during de-collapse. If they are eventually
     // collapsed, we record their incident edges for the decollapse procedure
-    pub dont_collapse_nodes: &'a mut FxHashSet<(usize, usize)>,
+    pub dont_collapse_nodes: &'a mut FxIndexSet<(usize, usize)>,
+    pub dont_collapse_nodes_lastorig: Option<(usize, usize)>,
     //   key: original node--because trait struct Direction does not support the Hash trait, we
     //        need to store the orientation as boolean, indicating whether the node is reversed
     //        (=>true)
@@ -251,52 +249,81 @@ impl<'a> CollapseEventTracker<'a> {
         res
     }
 
-    pub fn get_collapsed_nodes(&self, graph: &HashGraph, del_subg: &DeletedSubGraph) -> Vec<((usize, usize), (usize,
-            usize))> {
+    pub fn get_collapsed_nodes(
+        &self,
+        graph: &HashGraph,
+        del_subg: &DeletedSubGraph,
+    ) -> Vec<((usize, usize), (usize, usize))> {
         // returns a list of (duplicated node, rule)-tuples that are sorted in the order in which the de-collapse must be carried out
-        let mut locus_tags: IndexMap<(usize, usize), Vec<(usize, usize, usize)>> = IndexMap::new();
+        let mut locus_tags: FxHashMap<(usize, usize), Vec<(usize, usize)>> = FxHashMap::default();
 
-        for (i, (v, t_chain)) in self.transform.iter().enumerate() {
-            if self.dont_collapse_nodes.contains(v) {
-                for u in t_chain.iter() {
+        for v in self.dont_collapse_nodes.iter() {
+            // remember that transform is an FxIndexMap, so, we are iterating through transform in
+            // the order in which the nodes were added
+            if self.transform.contains_key(v) {
+                for u in self.expand(v.0, Direction::Right, v.1) {
                     let u_handle = Handle::pack(u.0, false);
+                    locus_tags
+                        .entry((u.0, u.2))
+                        .or_insert_with(|| Vec::new())
+                        .push((v.0, v.1));
+                }
+            }
+            // only iterate over original nodes
+            // unwrap() works here somewhat safely (*if used correctly*), because if one can
+            // iterate over dont_collapse_nodes, the list must have a last element in its original
+            // form
+            if v == &self.dont_collapse_nodes_lastorig.unwrap() {
+                break;
+            }
+        }
 
-                    // only decollapse nodes that are not deleted
-                    if graph.node_len(u_handle) == u.2 && ! del_subg.node_deleted(&u_handle) {
-                        locus_tags
-                            .entry((u.0, u.2))
-                            .or_insert_with(|| Vec::new())
-                            .push((v.0, v.1, i));
+        let mut counts: FxHashMap<(usize, usize), usize> = FxHashMap::default();
+
+        let mut rules_with_dupls: FxHashMap<(usize, usize), (usize, usize)> = FxHashMap::default();
+        for (dupl, rules) in locus_tags {
+            if rules.len() > 1 {
+                log::debug!(
+                    "node >{}:{} shares {} collapsed reference locations: {}",
+                    dupl.0,
+                    dupl.1,
+                    rules.len(),
+                    rules
+                        .iter()
+                        .map(|x| format!(">{}:{}", x.0, x.1))
+                        .collect::<Vec<String>>()
+                        .join(", ")
+                );
+                counts.insert(dupl, rules.len() - 1);
+                // decollapse all but one: skip first entry, corresponding to the oldest
+                // transformation rule
+                for rule in &rules[1..] {
+                    rules_with_dupls.insert(*rule, dupl);
+                }
+            }
+        }
+
+        let mut res: Vec<((usize, usize), (usize, usize))> = Vec::new();
+        for (v, rule) in self.transform.iter() {
+            if let Some(dupl) = rules_with_dupls.get(v).cloned() {
+                let mut dupl_found = false;
+                for u in rule {
+                    if counts[&dupl] > 0 && u.0 == dupl.0 && u.2 == dupl.1 {
+                        dupl_found |= true;
+                        res.push((dupl, *v));
+                        counts.entry(dupl).and_modify(|c| *c -= 1);
+                    }
+                }
+                if !dupl_found {
+                    for u in rule {
+                        rules_with_dupls.insert((u.0, u.2), dupl);
                     }
                 }
             }
         }
 
-        let mut res: Vec<(usize, (usize, usize), (usize, usize))> = Vec::new();
-        for (key, vals) in locus_tags.into_iter() {
-            if vals.len() > 1 {
-                log::debug!(
-                    "node >{}:{} shares {} collapsed reference locations: {}",
-                    key.0,
-                    key.1,
-                    vals.len(),
-                    vals.iter()
-                        .map(|x| format!(">{}:{}", x.0, x.1))
-                        .collect::<Vec<String>>()
-                        .join(", ")
-                );
-                // decollapse all but one: skip first entry, corresponding to the oldest
-                // transformation rule
-                res.extend(
-                    vals[1..]
-                        .into_iter()
-                        .map(|(uid, ulen, i)| (*i, key, (*uid, *ulen))),
-                );
-            }
-        }
-        res.sort_by_key(|x| x.0);
         res.reverse();
-        res.into_iter().map(|(_, u, v)| (u, v)).collect()
+        res
     }
 
     pub fn decollapse(
@@ -651,10 +678,12 @@ impl<'a> CollapseEventTracker<'a> {
         x
     }
 
-    pub fn new(dont_collapse_nodes: &'a mut FxHashSet<(usize, usize)>) -> Self {
+    pub fn new(dont_collapse_nodes: &'a mut FxIndexSet<(usize, usize)>) -> Self {
+        let last = dont_collapse_nodes.iter().last().cloned();
         CollapseEventTracker {
             transform: FxIndexMap::default(),
             dont_collapse_nodes: dont_collapse_nodes,
+            dont_collapse_nodes_lastorig: last,
             dont_collapse_edges: FxHashMap::default(),
             dont_collapse_siblings_group: FxHashMap::default(),
             dont_collapse_siblings_members: Vec::new(),

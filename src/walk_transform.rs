@@ -243,10 +243,25 @@ pub fn transform_walks(line: Vec<u8>, walk_map: &mut FxHashMap<Vec<u8>, Vec<u8>>
                 }
                 p += j + 1;
             }
-            if !path.is_empty() {
-                // remove last semicolon
-                path.pop();
+            if i < walk.len() {
+                let mut end = walk.len();
+                if walk[end - 1] == b'\n' {
+                    end -= 1
+                }
+                path.extend_from_slice(&walk[i + 1..end]);
+                match walk[i] {
+                    b'>' => path.push(b'+'),
+                    b'<' => path.push(b'-'),
+                    _ => panic!(
+                        "expected < or >, but observed '{}' at position i={}",
+                        walk[i] as char, i
+                    ),
+                }
             }
+            log::debug!(
+                "transformed path: {}",
+                std::str::from_utf8(&path[..]).unwrap()
+            );
             let mut transformed: Vec<u8> = Vec::new();
             transformed.push(b'P');
             transformed.push(b'\t');
