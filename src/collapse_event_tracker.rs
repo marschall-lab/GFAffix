@@ -49,7 +49,7 @@ impl<'a> CollapseEventTracker<'a> {
         &mut self,
         original_blunt_edges: Vec<((usize, Direction, usize), Vec<(usize, Direction, usize)>)>,
     ) {
-        log::error!(
+        log::debug!(
             "storing right-side edges of to-be-collapsed siblings {}",
             original_blunt_edges
                 .iter()
@@ -399,6 +399,8 @@ impl<'a> CollapseEventTracker<'a> {
                     // whose children shared some prefixes, and to their right comes the
                     // un-shared suffix
                     if wid == vid && wlen == vlen {
+                        // make sure the suffix node is *real*
+                        let (xid, xorient, xlen) = self.expand(xid, xorient, xlen)[0];
                         let y = self.decollapse_prefix(
                             (wid, worient, wlen),
                             (xid, xorient, xlen),
@@ -419,14 +421,22 @@ impl<'a> CollapseEventTracker<'a> {
                             xid,
                             xlen
                         );
-                        self.transform.insert(
-                            u,
-                            vec![
-                                (y.unpack_number() as usize, Direction::Right, wlen),
-                                (xid, xorient, xlen),
-                            ],
-                        );
+                        // update transform
+                        self.transform.entry(u).and_modify(|x| {
+                            x[0] = (y.unpack_number() as usize, Direction::Right, wlen)
+                        });
                     } else {
+                        assert!(
+                            vid == xid && vlen == xlen,
+                            "expected duplicated node >{}:{} at 2nd position, but found >{}:{}",
+                            vid,
+                            vlen,
+                            xid,
+                            xlen
+                        );
+                        // make sure the suffix node is *real*
+                        let (wid, worient, wlen) =
+                            self.expand(wid, worient, wlen).last().unwrap().clone();
                         // either the rule is in forward direction (then it is covered by
                         // the if-case), or it is in reverse direction (else)
                         let y = self.decollapse_prefix(
@@ -463,13 +473,10 @@ impl<'a> CollapseEventTracker<'a> {
                             v2str(&y.flip()),
                             xlen
                         );
-                        self.transform.insert(
-                            u,
-                            vec![
-                                (wid, worient, wlen),
-                                (y.unpack_number() as usize, Direction::Left, xlen),
-                            ],
-                        );
+                        // update transform
+                        self.transform.entry(u).and_modify(|x| {
+                            x[1] = (y.unpack_number() as usize, Direction::Left, xlen)
+                        });
                     }
                 }
                 [] | [_, _, _, ..] => unreachable!(),
@@ -501,18 +508,16 @@ impl<'a> CollapseEventTracker<'a> {
         // copy left-incident edges of u onto w
 
         for x in graph.neighbors(u, Direction::Left).collect::<Vec<Handle>>() {
-            log::debug!(
-                "creating duplicate {}{} of edge {}{}",
-                v2str(&x),
-                v2str(&w),
-                v2str(&x),
-                v2str(&u),
-            );
-            let e = Edge::edge_handle(x, w);
-            graph.create_edge(e);
-            // duplicate delete flags
-            if del_subg.edge_deleted(&x, &u) {
-                del_subg.add_edge(e);
+            if !del_subg.edge_deleted(&x, &u) {
+                log::debug!(
+                    "creating duplicate {}{} of edge {}{}",
+                    v2str(&x),
+                    v2str(&w),
+                    v2str(&x),
+                    v2str(&u),
+                );
+                let e = Edge::edge_handle(x, w);
+                graph.create_edge(e);
             }
         }
 

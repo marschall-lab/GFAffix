@@ -583,7 +583,7 @@ fn find_collapsible_blunt_end_pair(
                             {
                                 None
                             } else {
-                                log::info!(
+                                log::debug!(
                                     "found collapsible blunt end pair {}, {}",
                                     v2str(&v),
                                     v2str(&w)
