@@ -1021,7 +1021,7 @@ fn parse_and_transform_paths<W: io::Write, T: OptFields>(
             out_b.pop();
             write!(out, "P\t{}\t", str::from_utf8(&path.path_name)?)?;
             out.write(&out_b[..])?;
-            writeln!(out, "")?;
+            writeln!(out, "\t*")?;
         }
         out_b.clear();
     }
