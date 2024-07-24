@@ -533,8 +533,8 @@ impl<'a> CollapseEventTracker<'a> {
 
         graph.create_edge(Edge::edge_handle(w, v));
 
-        log::debug!("flagging edge {}{} as deleted", v2str(&u), v2str(&v),);
-        del_subg.add_edge(Edge::edge_handle(u, v));
+//        log::debug!("flagging edge {}{} as deleted during decollapse of node {}", v2str(&u), v2str(&v), v2str(&u));
+//        del_subg.add_edge(Edge::edge_handle(u, v));
 
         w
     }

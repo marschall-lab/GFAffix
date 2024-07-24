@@ -868,19 +868,46 @@ fn check_transform(
         if path.len() > 1 {
             for i in 0..(path.len() - 1) {
                 let u = Handle::pack(path[i].0, path[i].1 == Direction::Left);
-                let v = Handle::pack(path[i + 1].0, path[i + 1].1 == Direction::Left);
-                if del_subg.edge_deleted(&u, &v) {
+                let w = Handle::pack(path[i + 1].0, path[i + 1].1 == Direction::Left);
+                if !new_graph.has_edge(u, w) {
                     panic!(
-                        "edge {}{} is flagged as deleted new graph",
+                        "error in rule >{}:{}, graph does not contain edge {}{}",
+                        vid,
+                        vlen,
                         v2str(&u),
-                        v2str(&v)
+                        v2str(&w)
+                    );
+                }
+                if del_subg.edge_deleted(&u, &w) {
+                    panic!(
+                        "error in rule >{}:{}, edge {}{} is flagged as deleted new graph",
+                        vid,
+                        vlen,
+                        v2str(&u),
+                        v2str(&w)
+                    );
+                }
+                if del_subg.node_deleted(&u) {
+                    panic!(
+                        "error in rule >{}:{}, node {} is flagged as deleted new graph",
+                        vid,
+                        vlen,
+                        v2str(&u),
+                    );
+                }
+                if del_subg.node_deleted(&w) {
+                    panic!(
+                        "error in rule >{}:{}, node {} is flagged as deleted new graph",
+                        vid,
+                        vlen,
+                        v2str(&w),
                     );
                 }
             }
         } else {
-            let v = Handle::pack(path[0].0, path[0].1 == Direction::Left);
-            if del_subg.node_deleted(&v) {
-                panic!("node {} is flagged as deleted new graph", v2str(&v));
+            let w = Handle::pack(path[0].0, path[0].1 == Direction::Left);
+            if del_subg.node_deleted(&w) {
+                panic!("error in rule >{}:{}, node {} is flagged as deleted new graph", vid, vlen, v2str(&w));
             }
         }
 
@@ -904,6 +931,23 @@ fn check_transform(
                         .join(""),
                     String::from_utf8(new_seq).unwrap()
                     );
+            }
+            for u in old_graph.neighbors(v, Direction::Left) {
+                let ulen = old_graph.node_len(u);
+                let x = Handle::pack(path[0].0, path[0].1 == Direction::Left);
+                let w = match transform.get(&(u.unpack_number() as usize, ulen)) {
+                    Some(w) => if u.is_reverse() {
+                        let (wid, worient, _) = w.last().unwrap().clone();
+                        Handle::pack(wid as u64, worient == Direction::Right)
+                    } else {
+                        let (wid, worient, _) = w.first().unwrap().clone();
+                        Handle::pack(wid as u64, worient == Direction::Left)
+                    },
+                    None => u
+                };
+                if !new_graph.has_edge(w, v) || del_subg.edge_deleted(&w, &x) {
+                    panic!("edge {}{} in old graph either does not have counterpart {}{} in new graph, or edge is flagged as deleted", v2str(&u), v2str(&v), v2str(&w), v2str(&x));
+                }
             }
         }
     });
