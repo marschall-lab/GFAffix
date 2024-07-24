@@ -400,6 +400,7 @@ impl<'a> CollapseEventTracker<'a> {
                     // un-shared suffix
                     if wid == vid && wlen == vlen {
                         // make sure the suffix node is *real*
+                        let (oid, oorient, olen) = (xid, xorient, xlen);
                         let (xid, xorient, xlen) = self.expand(xid, xorient, xlen)[0];
                         let y = self.decollapse_prefix(
                             (wid, worient, wlen),
@@ -414,12 +415,12 @@ impl<'a> CollapseEventTracker<'a> {
                             u.1,
                             v2str(&y),
                             wlen,
-                            match xorient {
+                            match oorient {
                                 Direction::Right => ">",
                                 Direction::Left => "<",
                             },
-                            xid,
-                            xlen
+                            oid,
+                            olen
                         );
                         // update transform
                         self.transform.entry(u).and_modify(|x| {
@@ -435,6 +436,7 @@ impl<'a> CollapseEventTracker<'a> {
                             xlen
                         );
                         // make sure the suffix node is *real*
+                        let (oid, oorient, olen) = (wid, worient, wlen);
                         let (wid, worient, wlen) =
                             self.expand(wid, worient, wlen).last().unwrap().clone();
                         // either the rule is in forward direction (then it is covered by
@@ -464,12 +466,12 @@ impl<'a> CollapseEventTracker<'a> {
                             "updating transform to >{}:{}-> {}{}:{}{}:{}",
                             u.0,
                             u.1,
-                            match worient {
+                            match oorient {
                                 Direction::Right => ">",
                                 Direction::Left => "<",
                             },
-                            wid,
-                            wlen,
+                            oid,
+                            olen,
                             v2str(&y.flip()),
                             xlen
                         );
