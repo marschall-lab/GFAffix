@@ -298,7 +298,7 @@ impl<'a> CollapseEventTracker<'a> {
                 counts.insert(dupl, rules.len());
                 for rule in rules {
                     // it's not possible to de-collapse an "identity" transformation rule
-                    if rule.0 != dupl.0 && rule.1 != dupl.1 {
+                    if rule != dupl {
                         rules_with_dupls
                             .entry(rule)
                             .or_insert(Vec::new())
@@ -307,6 +307,8 @@ impl<'a> CollapseEventTracker<'a> {
                 }
             }
         }
+
+        log::debug!("rules_with_dupls: \n{}", rules_with_dupls.iter().map(|(k, v)| format!(">{}:{} -> {}", k.0, k.1, v.iter().map(|x| format!(">{}:{}", x.0, x.1)).collect::<Vec<String>>().join(","))).collect::<Vec<String>>().join("\n"));
 
         let mut res: Vec<((usize, usize), (usize, usize))> = Vec::new();
         for (v, rule) in self.transform.iter() {
@@ -317,7 +319,7 @@ impl<'a> CollapseEventTracker<'a> {
                             if u.0 == dupl.0 && u.2 == dupl.1 {
                                 res.push((dupl, *v));
                                 counts.entry(dupl).and_modify(|c| *c -= 1);
-                            } else {
+                            } else if u.2 >= dupl.1 {
                                 rules_with_dupls
                                     .entry((u.0, u.2))
                                     .or_insert(Vec::new())
