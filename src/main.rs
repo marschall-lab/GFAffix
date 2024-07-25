@@ -932,20 +932,21 @@ fn check_transform(
                     String::from_utf8(new_seq).unwrap()
                     );
             }
+            // todo: also check for edges on the other side
             for u in old_graph.neighbors(v, Direction::Left) {
                 let ulen = old_graph.node_len(u);
                 let x = Handle::pack(path[0].0, path[0].1 == Direction::Left);
                 let w = match transform.get(&(u.unpack_number() as usize, ulen)) {
                     Some(w) => if u.is_reverse() {
-                        let (wid, worient, _) = w.last().unwrap().clone();
+                        let (wid, worient, _) = w.first().unwrap().clone();
                         Handle::pack(wid as u64, worient == Direction::Right)
                     } else {
-                        let (wid, worient, _) = w.first().unwrap().clone();
+                        let (wid, worient, _) = w.last().unwrap().clone();
                         Handle::pack(wid as u64, worient == Direction::Left)
                     },
                     None => u
                 };
-                if !new_graph.has_edge(w, v) || del_subg.edge_deleted(&w, &x) {
+                if !new_graph.has_edge(w, x) || del_subg.edge_deleted(&w, &x) {
                     panic!("edge {}{} in old graph either does not have counterpart {}{} in new graph, or edge is flagged as deleted", v2str(&u), v2str(&v), v2str(&w), v2str(&x));
                 }
             }
@@ -1027,20 +1028,16 @@ fn parse_and_transform_paths<W: io::Write, T: OptFields>(
 ) -> Result<(), Box<dyn Error>> {
     let mut out_b: Vec<u8> = Vec::new();
     for path in gfa.paths.iter() {
-        log::debug!(
-            "transforming path/walk {}",
-            str::from_utf8(&path.path_name)?
-        );
         let l = path.segment_names.len();
         if out_b.capacity() < l {
             out_b.reserve(l - out_b.capacity());
         }
-        if walks.contains_key(&path.path_name[..]) {
-            write!(
-                out,
-                "W\t{}\t",
-                str::from_utf8(walks.get(&path.path_name[..]).unwrap())?
-            )?;
+        if let Some(walk_name_u8) = walks.get(&path.path_name[..]) {
+            log::debug!(
+                "transforming walk {}",
+                str::from_utf8(&path.path_name[..path.path_name.len() - 8])?
+            );
+            write!(out, "W\t{}\t", str::from_utf8(walk_name_u8)?)?;
             for (sid, o) in path.iter() {
                 for (vid, d) in
                     transform_node(sid, o, *orig_node_lens.get(&sid).unwrap(), transform)
@@ -1052,6 +1049,8 @@ fn parse_and_transform_paths<W: io::Write, T: OptFields>(
             out.write(&out_b[..])?;
             writeln!(out, "")?;
         } else {
+            let path_name = str::from_utf8(&path.path_name)?;
+            log::debug!("transforming path {}", path_name);
             for (sid, o) in path.iter() {
                 for (vid, d) in
                     transform_node(sid, o, *orig_node_lens.get(&sid).unwrap(), transform)
@@ -1063,7 +1062,7 @@ fn parse_and_transform_paths<W: io::Write, T: OptFields>(
             }
             // remove last ","
             out_b.pop();
-            write!(out, "P\t{}\t", str::from_utf8(&path.path_name)?)?;
+            write!(out, "P\t{}\t", path_name)?;
             out.write(&out_b[..])?;
             writeln!(out, "\t*")?;
         }

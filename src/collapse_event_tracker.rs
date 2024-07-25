@@ -280,7 +280,8 @@ impl<'a> CollapseEventTracker<'a> {
 
         let mut counts: FxHashMap<(usize, usize), usize> = FxHashMap::default();
 
-        let mut rules_with_dupls: FxHashMap<(usize, usize), (usize, usize)> = FxHashMap::default();
+        let mut rules_with_dupls: FxHashMap<(usize, usize), Vec<(usize, usize)>> =
+            FxHashMap::default();
         for (dupl, rules) in locus_tags {
             if rules.len() > 1 {
                 log::debug!(
@@ -294,34 +295,51 @@ impl<'a> CollapseEventTracker<'a> {
                         .collect::<Vec<String>>()
                         .join(", ")
                 );
-                counts.insert(dupl, rules.len() - 1);
-                // decollapse all but one: skip first entry, corresponding to the oldest
-                // transformation rule
-                for rule in &rules[1..] {
-                    rules_with_dupls.insert(*rule, dupl);
+                counts.insert(dupl, rules.len());
+                for rule in rules {
+                    // it's not possible to de-collapse an "identity" transformation rule
+                    if rule.0 != dupl.0 && rule.1 != dupl.1 {
+                        rules_with_dupls
+                            .entry(rule)
+                            .or_insert(Vec::new())
+                            .push(dupl);
+                    }
                 }
             }
         }
 
         let mut res: Vec<((usize, usize), (usize, usize))> = Vec::new();
         for (v, rule) in self.transform.iter() {
-            if let Some(dupl) = rules_with_dupls.get(v).cloned() {
-                let mut dupl_found = false;
-                for u in rule {
-                    if counts[&dupl] > 0 && u.0 == dupl.0 && u.2 == dupl.1 {
-                        dupl_found |= true;
-                        res.push((dupl, *v));
-                        counts.entry(dupl).and_modify(|c| *c -= 1);
-                    }
-                }
-                if !dupl_found {
+            if let Some(dupls) = rules_with_dupls.get(v).cloned() {
+                for dupl in dupls {
                     for u in rule {
-                        rules_with_dupls.insert((u.0, u.2), dupl);
+                        if counts[&dupl] > 1 {
+                            if u.0 == dupl.0 && u.2 == dupl.1 {
+                                res.push((dupl, *v));
+                                counts.entry(dupl).and_modify(|c| *c -= 1);
+                            } else {
+                                rules_with_dupls
+                                    .entry((u.0, u.2))
+                                    .or_insert(Vec::new())
+                                    .push(dupl);
+                            }
+                        }
                     }
                 }
             }
         }
-
+        assert!(
+            counts.values().all(|x| *x == 1),
+            "get_collapsed_nodes produced either too many decollapses or to few: \n{}",
+            counts
+                .iter()
+                .filter_map(|(k, v)| match *v {
+                    1 => None,
+                    _ => Some(format!(">{}:{} = {}", k.0, k.1, v)),
+                })
+                .collect::<Vec<String>>()
+                .join("\n")
+        );
         res.reverse();
         res
     }
@@ -338,6 +356,26 @@ impl<'a> CollapseEventTracker<'a> {
         for ((vid, vlen), u) in node2rule.into_iter() {
             match self.transform[&u][..] {
                 [(wid, worient, wlen)] => {
+                    assert!(
+                        vid == wid && vlen == wlen,
+                        "expected rule >{}:{} -> {}{}{} to point at duplicate {}{}:{}",
+                        u.0,
+                        u.1,
+                        match worient {
+                            Direction::Right => ">",
+                            Direction::Left => "<",
+                        },
+                        wid,
+                        wlen,
+                        // yeah, we are going to re-use the orientation of node w for this message
+                        match worient {
+                            Direction::Right => ">",
+                            Direction::Left => "<",
+                        },
+                        vid,
+                        vlen
+                    );
+
                     log::debug!(
                         "decollapsing transform >{}:{} -> {}{}:{}",
                         u.0,
@@ -361,7 +399,7 @@ impl<'a> CollapseEventTracker<'a> {
                     );
                     // update
                     log::debug!(
-                        "updating transform to >{}:{} -> {}:{}",
+                        "++ updating transform to >{}:{} -> {}:{}",
                         u.0,
                         u.1,
                         v2str(&y),
@@ -410,7 +448,7 @@ impl<'a> CollapseEventTracker<'a> {
                         );
                         // update transformation table to de-duplicate rule
                         log::debug!(
-                            "updating transform to >{}:{} -> {}:{}{}{}:{} ",
+                            "++ updating transform to >{}:{} -> {}:{}{}{}:{} ",
                             u.0,
                             u.1,
                             v2str(&y),
@@ -463,7 +501,7 @@ impl<'a> CollapseEventTracker<'a> {
                         );
                         // update transformation table to de-duplicate rule
                         log::debug!(
-                            "updating transform to >{}:{}-> {}{}:{}{}:{}",
+                            "++ updating transform to >{}:{}-> {}{}:{}{}:{}",
                             u.0,
                             u.1,
                             match oorient {
@@ -506,13 +544,13 @@ impl<'a> CollapseEventTracker<'a> {
         // assumes that the original node is split into two parts, where the first part, u, must
         // now be de-collapsed.
         let mut w = graph.append_handle(&graph.sequence_vec(u)[..]);
-        log::debug!("creating duplicate {} of node {}", v2str(&w), v2str(&u),);
+        log::debug!("++ creating duplicate {} of node {}", v2str(&w), v2str(&u),);
         // copy left-incident edges of u onto w
 
         for x in graph.neighbors(u, Direction::Left).collect::<Vec<Handle>>() {
             if !del_subg.edge_deleted(&x, &u) {
                 log::debug!(
-                    "creating duplicate {}{} of edge {}{}",
+                    "++ creating duplicate {}{} of edge {}{}",
                     v2str(&x),
                     v2str(&w),
                     v2str(&x),
@@ -524,7 +562,7 @@ impl<'a> CollapseEventTracker<'a> {
         }
 
         log::debug!(
-            "creating duplicate {}{} of edge {}{}",
+            "++ creating duplicate {}{} of edge {}{}",
             v2str(&w),
             v2str(&v),
             v2str(&u),
@@ -533,8 +571,8 @@ impl<'a> CollapseEventTracker<'a> {
 
         graph.create_edge(Edge::edge_handle(w, v));
 
-//        log::debug!("flagging edge {}{} as deleted during decollapse of node {}", v2str(&u), v2str(&v), v2str(&u));
-//        del_subg.add_edge(Edge::edge_handle(u, v));
+        //        log::debug!("flagging edge {}{} as deleted during decollapse of node {}", v2str(&u), v2str(&v), v2str(&u));
+        //        del_subg.add_edge(Edge::edge_handle(u, v));
 
         w
     }
@@ -549,10 +587,15 @@ impl<'a> CollapseEventTracker<'a> {
     ) -> Handle {
         let mut v = Handle::pack(v.0, v.1 == Direction::Left);
         let (uid, ulen) = u;
-        let u = Handle::pack(uid, false);
+        let mut u = Handle::pack(uid, false);
         let mut x = graph.append_handle(&graph.sequence_vec(v)[..]);
         let xlen = graph.node_len(x);
-        log::debug!("creating duplicate {} of node {}", v2str(&x), v2str(&v),);
+        log::debug!(
+            "++ creating duplicate {} of node >{}:{}",
+            v2str(&x),
+            uid,
+            ulen
+        );
 
         assert!(
             xlen == ulen,
@@ -570,12 +613,20 @@ impl<'a> CollapseEventTracker<'a> {
             if uorient == Direction::Left {
                 x = x.flip();
                 v = v.flip();
+                u = u.flip();
             }
             if let Some(group_id) =
                 self.dont_collapse_siblings_group
                     .get(&(uid, uorient == Direction::Left, ulen))
             {
                 recovered_sides[s] |= true;
+                log::debug!(
+                    "++ recovering child edges outgoing of \"{}\"",
+                    match uorient {
+                        Direction::Right => ">",
+                        Direction::Left => "<",
+                    }
+                );
 
                 let mut keep_neighbors: HashSet<Handle> = HashSet::default();
                 for (i, s) in self.dont_collapse_siblings_members[*group_id]
@@ -596,7 +647,7 @@ impl<'a> CollapseEventTracker<'a> {
                                 Handle::pack(yid, yorient == Direction::Left)
                             };
                             log::debug!(
-                                "creating duplicate {}{} of edge {}{}",
+                                "++ creating duplicate {}{} of edge {}{}",
                                 v2str(&x),
                                 v2str(&y),
                                 v2str(&u),
@@ -626,7 +677,7 @@ impl<'a> CollapseEventTracker<'a> {
                             .collect();
 
                         log::debug!(
-                            "keeping edges {} at original node",
+                            "++ keeping edges {} at original node",
                             neighbors
                                 .iter()
                                 .map(v2str)
@@ -642,7 +693,7 @@ impl<'a> CollapseEventTracker<'a> {
                 for w in graph.neighbors(v, Direction::Right) {
                     if !keep_neighbors.contains(&w) && !del_subg.node_deleted(&w) {
                         log::debug!(
-                            "flagging edge {}{} as deleted during decollapse of node {}",
+                            "++ flagging edge {}{} as deleted during decollapse of node {}",
                             v2str(&v),
                             v2str(&w),
                             v2str(&v),
@@ -654,21 +705,19 @@ impl<'a> CollapseEventTracker<'a> {
         }
 
         // recover other side
-        for is_recovered in recovered_sides {
-            if is_recovered {
+        for (i, is_recovered) in IntoIterator::into_iter(recovered_sides).enumerate() {
+            if !is_recovered {
+                log::debug!(
+                    "++ recovering parental edges outgoing of \"{}\"",
+                    if i == 0 { ">" } else { "<" }
+                );
+
                 // observe that x is already flipped in second iteration of previous loop
-                for w in graph
-                    .neighbors(v, Direction::Right)
-                    .collect::<Vec<Handle>>()
-                {
+                for w in graph.neighbors(v, Direction::Left).collect::<Vec<Handle>>() {
                     if !del_subg.node_deleted(&w) {
-                        log::debug!(
-                            "recovering parental edge {}{}",
-                            v2str(&w.flip()),
-                            v2str(&x.flip()),
-                        );
-                        let e = Edge::edge_handle(x, w);
-                        if !graph.has_edge(x, w) {
+                        log::debug!("++ recovering parental edge {}{}", v2str(&w), v2str(&x));
+                        let e = Edge::edge_handle(w, x);
+                        if !graph.has_edge(w, x) {
                             graph.create_edge(e);
                         }
                     }
@@ -682,7 +731,7 @@ impl<'a> CollapseEventTracker<'a> {
         if del_subg.node_deleted(&v) {
             del_subg.add_node(x);
         }
-        x
+        x.flip()
     }
 
     pub fn new(dont_collapse_nodes: &'a mut FxIndexSet<(usize, usize)>) -> Self {
