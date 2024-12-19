@@ -562,7 +562,7 @@ fn find_collapsible_blunt_end_pair(
         graph
             .neighbors(v, Direction::Right)
             .filter_map(|u| {
-                if del_subg.node_deleted(&u) {
+                if del_subg.node_deleted(&u) || del_subg.edge_deleted(&u, &v) {
                     None
                 } else {
                     graph
