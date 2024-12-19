@@ -282,8 +282,7 @@ fn collapse(
     // the essential part of the graph adjacencies that must be restored
 
     let mut has_blunt_nodes = false;
-    let mut original_edges: Vec<(OrientedNode, Vec<OrientedNode>)> =
-        Vec::new();
+    let mut original_edges: Vec<(OrientedNode, Vec<OrientedNode>)> = Vec::new();
     let mut n_dont_collapse_nodes = 0;
 
     for v in shared_prefix.shared_prefix_nodes.iter() {
@@ -565,22 +564,18 @@ fn find_collapsible_blunt_end_pair(
                 if del_subg.node_deleted(&u) || del_subg.edge_deleted(&u, &v) {
                     None
                 } else {
-                    graph
-                        .neighbors(u, Direction::Left)
-                        .find(|&w| {
-                            !del_subg.node_deleted(&w)
-                                && w != v
-                                && get_shared_prefix(&[w.flip(), v.flip()], graph)
-                                    .unwrap()
-                                    .len()
-                                    == l
-                                && HashSet::<Handle>::from_iter(
-                                    graph.neighbors(v, Direction::Right),
-                                )
+                    graph.neighbors(u, Direction::Left).find(|&w| {
+                        !del_subg.node_deleted(&w)
+                            && w != v
+                            && get_shared_prefix(&[w.flip(), v.flip()], graph)
+                                .unwrap()
+                                .len()
+                                == l
+                            && HashSet::<Handle>::from_iter(graph.neighbors(v, Direction::Right))
                                 .is_subset(&HashSet::from_iter(
                                     graph.neighbors(w, Direction::Right),
                                 ))
-                        })
+                    })
                 }
             })
             .next()
@@ -610,7 +605,11 @@ fn find_and_collapse_blunt_ends(
                 // we only need to re-assess the blunt end
                 new_queue.push(v);
             } else {
-                log::debug!("found collapsible blunt end pair {}, {}", v2str(&v), v2str(&u));
+                log::debug!(
+                    "found collapsible blunt end pair {}, {}",
+                    v2str(&v),
+                    v2str(&u)
+                );
                 // remove *one* character, because VG assumes that each chromosome starts with a
                 // left-degree 0 node
                 let prefix = String::from_utf8({
@@ -665,10 +664,7 @@ fn find_and_collapse_walk_preserving_shared_affixes<'a>(
         while !queue.is_empty() {
             let mut cur_affixes = find_walk_preserving_shared_affixes(graph, &del_subg, queue);
             cur_affixes.sort_by_cached_key(|x| {
-                (
-                    -(x.sequence.len() as i64),
-                    *x.parents.iter().min().unwrap(),
-                )
+                (-(x.sequence.len() as i64), *x.parents.iter().min().unwrap())
             });
             queue = Vec::new();
             let mut cur_modified_nodes = FxHashSet::default();

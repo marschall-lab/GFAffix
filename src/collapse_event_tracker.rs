@@ -207,11 +207,8 @@ impl<'a> CollapseEventTracker<'a> {
         res
     }
 
-    pub fn get_expanded_transformation(
-        &self,
-    ) -> FxHashMap<Node, Vec<OrientedNode>> {
-        let mut res: FxHashMap<Node, Vec<OrientedNode>> =
-            FxHashMap::default();
+    pub fn get_expanded_transformation(&self) -> FxHashMap<Node, Vec<OrientedNode>> {
+        let mut res: FxHashMap<Node, Vec<OrientedNode>> = FxHashMap::default();
         res.reserve(self.transform.len());
 
         for (node_id, node_len) in self.transform.keys() {
@@ -258,10 +255,7 @@ impl<'a> CollapseEventTracker<'a> {
             // the order in which the nodes were added
             if self.transform.contains_key(v) {
                 for u in self.expand(v.0, Direction::Right, v.1) {
-                    locus_tags
-                        .entry((u.0, u.2))
-                        .or_default()
-                        .push((v.0, v.1));
+                    locus_tags.entry((u.0, u.2)).or_default().push((v.0, v.1));
                 }
             }
             // only iterate over original nodes
@@ -293,10 +287,7 @@ impl<'a> CollapseEventTracker<'a> {
                 for rule in rules {
                     // it's not possible to de-collapse an "identity" transformation rule
                     if rule != dupl {
-                        rules_with_dupls
-                            .entry(rule)
-                            .or_default()
-                            .push(dupl);
+                        rules_with_dupls.entry(rule).or_default().push(dupl);
                     }
                 }
             }
@@ -329,10 +320,7 @@ impl<'a> CollapseEventTracker<'a> {
                                 res.push((dupl, *v));
                                 counts.entry(dupl).and_modify(|c| *c -= 1);
                             } else if u.2 >= dupl.1 {
-                                rules_with_dupls
-                                    .entry((u.0, u.2))
-                                    .or_default()
-                                    .push(dupl);
+                                rules_with_dupls.entry((u.0, u.2)).or_default().push(dupl);
                             }
                         }
                     }
@@ -403,9 +391,7 @@ impl<'a> CollapseEventTracker<'a> {
                     let y = self.decollapse_blunt_node(
                         (wid, worient, wlen),
                         u,
-                        decollapsed_blunt_siblings
-                            .entry((vid, vlen))
-                            .or_default(),
+                        decollapsed_blunt_siblings.entry((vid, vlen)).or_default(),
                         graph,
                         del_subg,
                     );
