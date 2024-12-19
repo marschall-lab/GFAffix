@@ -4,12 +4,12 @@ use std::error::Error;
 use std::fs;
 use std::io;
 use std::io::prelude::*;
-use std::iter::{repeat, FromIterator};
-use std::str::{self, FromStr};
-use std::sync::{Arc, Mutex};
+use std::iter::FromIterator;
+use std::str;
 
 /* crate use */
-use clap::Parser;
+use clap::{crate_version, Parser};
+use env_logger::Env;
 use gfa::{
     gfa::{orientation::Orientation, GFA},
     optfields::OptFields,
@@ -20,7 +20,6 @@ use handlegraph::{
     handlegraph::*,
     hashgraph::HashGraph,
     mutablehandlegraph::{AdditiveHandleGraph, MutableHandles},
-    pathhandlegraph::GraphPathNames,
 };
 use indexmap::{IndexMap, IndexSet};
 use rayon::prelude::*;
@@ -36,20 +35,19 @@ mod deleted_sub_graph;
 use deleted_sub_graph::*;
 mod walk_transform;
 use walk_transform::*;
-mod decomposition;
-use decomposition::*;
 
 const EXPLORE_NEIGHBORHOOD: usize = 2;
 type FxIndexMap<K, V> = IndexMap<K, V, FxBuildHasher>;
 type FxIndexSet<V> = IndexSet<V, FxBuildHasher>;
 
+type OrientedNode = (usize, Direction, usize);
+type Node = (usize, usize);
+
 #[derive(Parser, Debug)]
 #[clap(
-    version = "0.1.5b",
+    version = crate_version!(),
     author = "Daniel Doerr <daniel.doerr@hhu.de>",
-    about = "Discover and collapse walk-preserving shared affixes of a given variation graph.\n
-    - Do you want log output? Call program with 'RUST_LOG=info gfaffix ...'
-    - Log output not informative enough? Try 'RUST_LOG=debug gfaffix ...'"
+    about = "Discover and collapse walk-preserving shared affixes of a given variation graph."
 )]
 pub struct Command {
     #[clap(index = 1, help = "graph in GFA1 format", required = true)]
@@ -93,6 +91,9 @@ pub struct Command {
         default_value = "1"
     )]
     threads: usize,
+
+    #[clap(short = 'v', long, help = "Sets log level to debug")]
+    verbose: bool,
 }
 
 pub fn v2str(v: &Handle) -> String {
@@ -139,7 +140,7 @@ fn enumerate_branch(
             if c >= 90 {
                 c -= 32
             }
-            let children = branch.entry((c, parents)).or_insert_with(VecDeque::new);
+            let children = branch.entry((c, parents)).or_default();
 
             // Sort handles with shared prefix so that reversed ones come first! This is important
             // for the case that two shared prefixes correspond to the same node, one in forward,
@@ -235,7 +236,7 @@ fn enumerate_walk_preserving_shared_affixes(
                     // don't do anything
                     res.push(AffixSubgraph {
                         sequence: prefix,
-                        parents: parents,
+                        parents,
                         shared_prefix_nodes: children_vec,
                     });
                 } else {
@@ -281,7 +282,7 @@ fn collapse(
     // the essential part of the graph adjacencies that must be restored
 
     let mut has_blunt_nodes = false;
-    let mut original_edges: Vec<((usize, Direction, usize), Vec<(usize, Direction, usize)>)> =
+    let mut original_edges: Vec<(OrientedNode, Vec<OrientedNode>)> =
         Vec::new();
     let mut n_dont_collapse_nodes = 0;
 
@@ -508,7 +509,7 @@ fn find_walk_preserving_shared_affixes(
         .par_iter()
         .filter_map(|v| {
             if !del_subg.node_deleted(v) {
-                Some(enumerate_walk_preserving_shared_affixes(graph, &del_subg, *v).unwrap())
+                Some(enumerate_walk_preserving_shared_affixes(graph, del_subg, *v).unwrap())
             } else {
                 None
             }
@@ -524,8 +525,7 @@ fn find_affected_nodes(graph: &HashGraph, del_subg: &DeletedSubGraph, v: Handle)
 
     let mut res = Vec::new();
 
-    while !queue.is_empty() {
-        let (d, v) = queue.pop().unwrap();
+    while let Some((d, v)) = queue.pop() {
         if !del_subg.node_deleted(&v) && !visited.contains(&v.forward()) {
             visited.insert(v.forward());
             res.push(v);
@@ -567,31 +567,20 @@ fn find_collapsible_blunt_end_pair(
                 } else {
                     graph
                         .neighbors(u, Direction::Left)
-                        .filter_map(|w| {
-                            if del_subg.node_deleted(&w)
-                                || w == v
-                                || get_shared_prefix(&[w.flip(), v.flip()], graph)
+                        .find(|&w| {
+                            !del_subg.node_deleted(&w)
+                                && w != v
+                                && get_shared_prefix(&[w.flip(), v.flip()], graph)
                                     .unwrap()
                                     .len()
-                                    != l
-                                || !HashSet::<Handle>::from_iter(
+                                    == l
+                                && HashSet::<Handle>::from_iter(
                                     graph.neighbors(v, Direction::Right),
                                 )
                                 .is_subset(&HashSet::from_iter(
                                     graph.neighbors(w, Direction::Right),
                                 ))
-                            {
-                                None
-                            } else {
-                                log::debug!(
-                                    "found collapsible blunt end pair {}, {}",
-                                    v2str(&v),
-                                    v2str(&w)
-                                );
-                                Some(w)
-                            }
                         })
-                        .next()
                 }
             })
             .next()
@@ -621,6 +610,7 @@ fn find_and_collapse_blunt_ends(
                 // we only need to re-assess the blunt end
                 new_queue.push(v);
             } else {
+                log::debug!("found collapsible blunt end pair {}, {}", v2str(&v), v2str(&u));
                 // remove *one* character, because VG assumes that each chromosome starts with a
                 // left-degree 0 node
                 let prefix = String::from_utf8({
@@ -676,8 +666,8 @@ fn find_and_collapse_walk_preserving_shared_affixes<'a>(
             let mut cur_affixes = find_walk_preserving_shared_affixes(graph, &del_subg, queue);
             cur_affixes.sort_by_cached_key(|x| {
                 (
-                    -1 * (x.sequence.len() as i64),
-                    x.parents.iter().min().unwrap().clone(),
+                    -(x.sequence.len() as i64),
+                    *x.parents.iter().min().unwrap(),
                 )
             });
             queue = Vec::new();
@@ -746,35 +736,11 @@ fn find_and_collapse_walk_preserving_shared_affixes<'a>(
     (affixes, del_subg, event_tracker)
 }
 
-fn merge_graphs(
-    component: Vec<HashGraph>,
-    endpoints: HashGraph,
-    del_subg: &DeletedSubGraph,
-) -> HashGraph {
-    let mut res = endpoints;
-
-    for g in component {
-        for v in g.handles() {
-            if !del_subg.node_deleted(&v) && !res.has_node(v) {
-                res.create_handle(&g.sequence_vec(v)[..], v.id());
-            }
-        }
-        for e in g.edges() {
-            if !del_subg.edge_deleted(&e.0, &e.1) {
-                assert!(!res.has_edge(e.0, e.1), "assumed edges are disjoint");
-                res.create_edge(e);
-            }
-        }
-    }
-
-    res
-}
-
 fn transform_node(
     vid: usize,
     orient: Orientation,
     v_len: usize,
-    transform: &FxHashMap<(usize, usize), Vec<(usize, Direction, usize)>>,
+    transform: &FxHashMap<Node, Vec<OrientedNode>>,
 ) -> Vec<(usize, Direction)> {
     match transform.get(&(vid, v_len)) {
         Some(us) => match orient {
@@ -843,7 +809,7 @@ fn print_active_subgraph<W: io::Write>(
 fn check_transform(
     old_graph: &HashGraph,
     new_graph: &HashGraph,
-    transform: &FxHashMap<(usize, usize), Vec<(usize, Direction, usize)>>,
+    transform: &FxHashMap<Node, Vec<OrientedNode>>,
     del_subg: &DeletedSubGraph,
 ) {
     transform.par_iter().for_each(|((vid, vlen), path)| {
@@ -938,10 +904,10 @@ fn check_transform(
                 let x = Handle::pack(path[0].0, path[0].1 == Direction::Left);
                 let w = match transform.get(&(u.unpack_number() as usize, ulen)) {
                     Some(w) => if u.is_reverse() {
-                        let (wid, worient, _) = w.first().unwrap().clone();
+                        let (wid, worient, _) = *w.first().unwrap();
                         Handle::pack(wid as u64, worient == Direction::Right)
                     } else {
-                        let (wid, worient, _) = w.last().unwrap().clone();
+                        let (wid, worient, _) = *w.last().unwrap();
                         Handle::pack(wid as u64, worient == Direction::Left)
                     },
                     None => u
@@ -955,7 +921,7 @@ fn check_transform(
 }
 
 fn print_transformations<W: Write>(
-    transform: &FxHashMap<(usize, usize), Vec<(usize, Direction, usize)>>,
+    transform: &FxHashMap<Node, Vec<OrientedNode>>,
     orig_node_lens: &FxHashMap<usize, usize>,
     out: &mut io::BufWriter<W>,
 ) -> Result<(), io::Error> {
@@ -990,7 +956,7 @@ fn print_transformations<W: Write>(
     Ok(())
 }
 
-fn spell_walk(graph: &HashGraph, walk: &[(usize, Direction, usize)]) -> Vec<u8> {
+fn spell_walk(graph: &HashGraph, walk: &[OrientedNode]) -> Vec<u8> {
     let mut res: Vec<u8> = Vec::new();
 
     let mut prev_v: Option<Handle> = None;
@@ -1022,7 +988,7 @@ fn print<W: io::Write>(affix: &AffixSubgraph, out: &mut io::BufWriter<W>) -> Res
 fn parse_and_transform_paths<W: io::Write, T: OptFields>(
     gfa: &GFA<usize, T>,
     orig_node_lens: &FxHashMap<usize, usize>,
-    transform: &FxHashMap<(usize, usize), Vec<(usize, Direction, usize)>>,
+    transform: &FxHashMap<Node, Vec<OrientedNode>>,
     walks: &FxHashMap<Vec<u8>, Vec<u8>>,
     out: &mut io::BufWriter<W>,
 ) -> Result<(), Box<dyn Error>> {
@@ -1046,8 +1012,8 @@ fn parse_and_transform_paths<W: io::Write, T: OptFields>(
                     out_b.extend_from_slice(vid.to_string().as_bytes());
                 }
             }
-            out.write(&out_b[..])?;
-            writeln!(out, "")?;
+            out.write_all(&out_b[..])?;
+            writeln!(out)?;
         } else {
             let path_name = str::from_utf8(&path.path_name)?;
             log::debug!("transforming path {}", path_name);
@@ -1063,7 +1029,7 @@ fn parse_and_transform_paths<W: io::Write, T: OptFields>(
             // remove last ","
             out_b.pop();
             write!(out, "P\t{}\t", path_name)?;
-            out.write(&out_b[..])?;
+            out.write_all(&out_b[..])?;
             writeln!(out, "\t*")?;
         }
         out_b.clear();
@@ -1087,107 +1053,13 @@ fn parse_header<R: io::Read>(mut data: io::BufReader<R>) -> Result<Vec<u8>, io::
     Ok(buf)
 }
 
-fn count_copies(
-    visited_nodes: &mut FxHashMap<usize, usize>,
-    visited_edges: &mut FxHashMap<Edge, usize>,
-    path: &Vec<(usize, Direction)>,
-) {
-    for i in 1..path.len() {
-        let (u, ou) = path[i - 1];
-        let (v, ov) = path[i];
-        visited_nodes.get_mut(&u).map(|x| *x += 1);
-
-        let e = Edge::edge_handle(
-            Handle::pack(u, ou == Direction::Left),
-            Handle::pack(v, ov == Direction::Left),
-        );
-        visited_edges.get_mut(&e).map(|x| *x += 1);
-    }
-    if let Some((v, _)) = path.last() {
-        visited_nodes.get_mut(&v).map(|x| *x += 1);
-    }
-}
-
-//fn remove_unused_copies<R: io::Read, T: OptFields>(
-//    copies: &Vec<usize>,
-//    graph: &HashGraph,
-//    mut data: io::BufReader<R>,
-//    gfa: &GFA<usize, T>,
-//    orig_node_lens: &FxHashMap<usize, usize>,
-//    transform: &FxHashMap<(usize, usize), Vec<(usize, Direction, usize)>>,
-//    del_subg: &mut DeletedSubGraph,
-//) -> (usize, usize) {
-//    // construct hashmap for counting the visits of edges introduced by the duplication process
-//    let mut visited_edges = FxHashMap::default();
-//    for i in copies.iter() {
-//        let v = Handle::pack(*i, false);
-//        for w in graph.neighbors(v, Direction::Left) {
-//            visited_edges.insert(Edge::edge_handle(w, v), 0);
-//        }
-//        for w in graph.neighbors(v, Direction::Right) {
-//            visited_edges.insert(Edge::edge_handle(v, w), 0);
-//        }
-//    }
-//
-//    // construct hashmap to count visits to nodes
-//    let mut visited_nodes: FxHashMap<usize, usize> =
-//        FxHashMap::from_iter(copies.iter().cloned().zip(repeat(0)));
-//
-//    for path in gfa.paths.iter() {
-//        let tpath = transform_path(
-//            &path
-//                .iter()
-//                .map(|(sid, o)| {
-//                    (
-//                        sid,
-//                        match o {
-//                            Orientation::Forward => Direction::Right,
-//                            Orientation::Backward => Direction::Left,
-//                        },
-//                        *orig_node_lens.get(&sid).unwrap(),
-//                    )
-//                })
-//                .collect::<Vec<(usize, Direction, usize)>>()[..],
-//            transform,
-//        );
-//        count_copies(&mut visited_nodes, &mut visited_edges, &tpath);
-//    }
-//
-//    // counters for removed nodes and edges
-//    let mut cv = 0;
-//    let mut ce = 0;
-//
-//    for (i, c) in visited_nodes.iter() {
-//        if *c == 0 {
-//            log::debug!("Removing unused duplicate node {}", i);
-//            del_subg.add_node(Handle::pack(*i, false));
-//            cv += 1;
-//        }
-//    }
-//
-//    for (Edge(u, v), c) in visited_edges.iter() {
-//        if *c == 0 {
-//            log::debug!("Removing unused duplicate edge {}{}", v2str(u), v2str(v));
-//            // we don't need Edge::edge_handle here, because edges in visited_edges are already
-//            // canonical
-//            del_subg.add_edge(Edge(*u, *v));
-//            ce += 1;
-//        }
-//    }
-//
-//    (cv, ce)
-//}
-
 fn parse_gfa_v12<R: io::Read>(
     data: io::BufReader<R>,
 ) -> (GFA<usize, ()>, FxHashMap<Vec<u8>, Vec<u8>>) {
     let parser = GFAParser::new();
 
     let mut walks = FxHashMap::default();
-    // TODO
-    //
     let lines: Vec<Vec<u8>> = ByteLineReader::new(data)
-        .into_iter()
         .map(|x| transform_walks(x, &mut walks))
         .collect();
     let gfa: GFA<usize, ()> = parser.parse_lines(lines.iter().map(|x| &x[..])).unwrap();
@@ -1196,13 +1068,18 @@ fn parse_gfa_v12<R: io::Read>(
 }
 
 fn main() -> Result<(), io::Error> {
-    env_logger::init();
-
     // print output to stdout
     let mut out = io::BufWriter::new(std::io::stdout());
 
     // initialize command line parser & parse command line arguments
     let params = Command::parse();
+
+    env_logger::Builder::from_env(Env::default().default_filter_or(if params.verbose {
+        "debug"
+    } else {
+        "info"
+    }))
+    .init();
 
     if params.threads > 0 {
         log::info!("running panacus on {} threads", &params.threads);
@@ -1249,7 +1126,7 @@ fn main() -> Result<(), io::Error> {
         node_lens.insert(v.unpack_number() as usize, graph.node_len(v));
     }
 
-    let mut dont_collapse_nodes: FxIndexSet<(usize, usize)> = FxIndexSet::default();
+    let mut dont_collapse_nodes: FxIndexSet<Node> = FxIndexSet::default();
     if !params.no_collapse_path.trim().is_empty() {
         let re = Regex::new(&params.no_collapse_path).unwrap();
         for path in paths.iter() {
@@ -1295,21 +1172,7 @@ fn main() -> Result<(), io::Error> {
 
     if !event_tracker.dont_collapse_nodes.is_empty() {
         log::info!("de-collapse no-collapse handles and update transformation table");
-        let copies = event_tracker.decollapse(&mut graph, &mut del_subg);
-        //        let old_graph = HashGraph::from_gfa(&gfa);
-        //
-        //        let data = io::BufReader::new(fs::File::open(&params.graph)?);
-        //        log::info!("cleaning up copies created during de-duplication...");
-        //        let (cv, ce) = remove_unused_copies(
-        //            &copies,
-        //            &graph,
-        //            data,
-        //            &gfa,
-        //            &node_lens,
-        //            &event_tracker.get_expanded_transformation(),
-        //            &mut del_subg,
-        //        );
-        //        log::info!("...removed {} unused duplicated nodes and {} edges", cv, ce);
+        event_tracker.decollapse(&mut graph, &mut del_subg);
     }
 
     log::info!("expand transformation table");

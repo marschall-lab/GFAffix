@@ -49,14 +49,4 @@ impl DeletedSubGraph {
             edges: FxHashSet::default(),
         }
     }
-
-    pub fn merge(del_subgs: Vec<Self>) -> Self {
-        let mut res = DeletedSubGraph::new();
-
-        for x in del_subgs {
-            res.nodes.extend(x.nodes);
-            res.edges.extend(x.edges);
-        }
-        res
-    }
 }
