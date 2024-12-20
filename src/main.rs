@@ -2,15 +2,15 @@
 use std::collections::{HashSet, VecDeque};
 use std::error::Error;
 use std::fs;
-use std::io::prelude::*;
 use std::io;
+use std::io::prelude::*;
 use std::iter::FromIterator;
 use std::str;
 
 /* crate use */
 use clap::{crate_version, Parser};
-use flate2::{read::MultiGzDecoder, write::GzEncoder, Compression};
 use env_logger::Env;
+use flate2::{read::MultiGzDecoder, write::GzEncoder, Compression};
 use gfa::{
     gfa::{orientation::Orientation, GFA},
     optfields::OptFields,
@@ -51,14 +51,18 @@ type Node = (usize, usize);
     about = "Discover and collapse walk-preserving shared affixes of a given variation graph."
 )]
 pub struct Command {
-    #[clap(index = 1, help = "graph in GFA1 format, supports compressed (.gz) input", required = true)]
+    #[clap(
+        index = 1,
+        help = "graph in GFA1 format, supports compressed (.gz) input",
+        required = true
+    )]
     pub graph: String,
 
     #[clap(
         short = 'o',
         long = "output_refined",
         help = "Write refined graph output (GFA1 format) to supplied file instead of stdout; if file name ends with .gz, output will be compressed",
-        default_value = "" 
+        default_value = ""
     )]
     pub refined_graph_out: String,
 
@@ -66,14 +70,14 @@ pub struct Command {
         short = 't',
         long = "output_transformation",
         help = "Report original nodes and their corresponding walks in refined graph to supplied file",
-        default_value = "" 
+        default_value = ""
     )]
     pub transformation_out: String,
 
     #[clap(
         short = 'c',
         long = "check_transformation",
-        help = "Verifies that the transformed parts of the graphs spell out the identical sequence as in the original graph",
+        help = "Verifies that the transformed parts of the graphs spell out the identical sequence as in the original graph"
     )]
     pub check_transformation: bool,
 
@@ -81,15 +85,15 @@ pub struct Command {
         short = 'a',
         long = "output_affixes",
         help = "Report identified affixes",
-        default_value = "" 
+        default_value = ""
     )]
     pub affixes_out: String,
 
     #[clap(
         short = 'x',
         long = "dont_collapse",
-        help = "Do not collapse nodes on a given paths (\"P\" lines) that match given regular expression",
-        default_value = "" 
+        help = "Do not collapse nodes on a given paths/walks (\"P\"/\"W\" lines) that match given regular expression",
+        default_value = ""
     )]
     pub no_collapse_path: String,
 
@@ -575,10 +579,10 @@ fn find_collapsible_blunt_end_pair(
                     None
                 } else {
                     graph.neighbors(u, Direction::Left).find(|&w| {
-                        !del_subg.node_deleted(&w)
-                            && !del_subg.edge_deleted(&w, &u)
-                            && w != v
-                            && !(dont_collapse_nodes
+                        !(del_subg.node_deleted(&w)
+                            || del_subg.edge_deleted(&w, &u)
+                            || w == v
+                            || dont_collapse_nodes
                                 .contains(&(w.unpack_number() as usize, graph.node_len(w)))
                                 && dont_collapse_nodes
                                     .contains(&(v.unpack_number() as usize, graph.node_len(v))))
@@ -607,6 +611,7 @@ fn find_and_collapse_blunt_ends(
         .chain(graph.handles().map(|v| v.flip()))
         .collect();
 
+    let mut blunt_end_count = 0;
     while !queue.is_empty() {
         let collapsible_blunts: Vec<(Handle, Handle)> = queue
             .par_iter()
@@ -645,12 +650,19 @@ fn find_and_collapse_blunt_ends(
                     );
                     // parent set is not potentially not identical, but we need to make it so that
                     // it works
-                    // TODO
-//                    for graph.neighbors(v, Direction::Right) {
-//                            .is_subset(&HashSet::from_iter(
-//                                graph.neighbors(w, Direction::Right),
-//                            ))
-//                    }
+                    for w in graph
+                        .neighbors(u, Direction::Right)
+                        .collect::<Vec<Handle>>()
+                    {
+                        if !graph.has_edge(v, w) && !del_subg.edge_deleted(&u, &w) {
+                            log::debug!(
+                                "complementing graph with edge {}{} prior to blunt-end-collapse",
+                                v2str(&v),
+                                v2str(&w)
+                            );
+                            graph.create_edge(Edge::edge_handle(v, w));
+                        }
+                    }
                     collapse(
                         graph,
                         &AffixSubgraph {
@@ -666,16 +678,18 @@ fn find_and_collapse_blunt_ends(
                     );
                     modified_nodes.insert(v.forward());
                     modified_nodes.insert(u.forward());
+                    blunt_end_count += 1;
                 }
             }
         }
         queue = new_queue;
     }
+    log::info!("found and collapsed {} blunt ends", blunt_end_count);
 }
 
 fn find_and_collapse_walk_preserving_shared_affixes<'a>(
     graph: &mut HashGraph,
-    dont_collapse_nodes: &'a mut FxIndexSet<(usize, usize)>,
+    dont_collapse_nodes: &'a mut FxIndexSet<Node>,
 ) -> (
     Vec<AffixSubgraph>,
     DeletedSubGraph,
@@ -756,7 +770,7 @@ fn find_and_collapse_walk_preserving_shared_affixes<'a>(
     }
 
     log::info!(
-        "identified {} shared prefixes, {} of which are overlapping, and {} of which are bubbles",
+        "founda nd collapsed {} shared prefixes, {} of which are overlapping, and {} of which are bubbles",
         event_tracker.events,
         event_tracker.overlapping_events,
         event_tracker.bubbles
@@ -837,6 +851,7 @@ fn print_active_subgraph<W: io::Write>(
 fn check_transform(
     old_graph: &HashGraph,
     new_graph: &HashGraph,
+    event_tracker: &CollapseEventTracker,
     transform: &FxHashMap<Node, Vec<OrientedNode>>,
     del_subg: &DeletedSubGraph,
 ) {
@@ -946,6 +961,25 @@ fn check_transform(
             }
         }
     });
+
+    let mut decollapsed: FxHashSet<Node> = FxHashSet::default();
+    for v in event_tracker.dont_collapse_nodes.iter() {
+        if let Some(path) = transform.get(v) {
+            for &(uid, _, ulen) in path.iter() {
+                if decollapsed.contains(&(uid, ulen)) {
+                    panic!("node {}:{} is collapsed on reference path", uid, ulen);
+                }
+                decollapsed.insert((uid, ulen));
+            }
+        }
+        // only iterate over original nodes
+        // unwrap() works here somewhat safely (*if used correctly*), because if one can
+        // iterate over dont_collapse_nodes, the list must have a last element in its original
+        // form
+        if Some(*v) == event_tracker.dont_collapse_nodes_lastorig {
+            break;
+        }
+    }
 }
 
 fn print_transformations<W: Write>(
@@ -1096,7 +1130,6 @@ fn parse_gfa_v12<R: io::Read>(
 }
 
 fn main() -> Result<(), io::Error> {
-
     // initialize command line parser & parse command line arguments
     let params = Command::parse();
 
@@ -1137,7 +1170,7 @@ fn main() -> Result<(), io::Error> {
     } else {
         Box::new(f)
     };
-    
+
     let (mut gfa, walks) = parse_gfa_v12(io::BufReader::new(reader));
 
     //
@@ -1224,7 +1257,7 @@ fn main() -> Result<(), io::Error> {
         log::info!("checking correctness of applied transformations...");
 
         let old_graph = HashGraph::from_gfa(&gfa);
-        check_transform(&old_graph, &graph, &transform, &del_subg);
+        check_transform(&old_graph, &graph, &event_tracker, &transform, &del_subg);
         log::info!("all correct!");
     }
 
@@ -1237,24 +1270,32 @@ fn main() -> Result<(), io::Error> {
         }
     }
 
-
     // set up graph output stream
-    let mut graph_out : io::BufWriter<Box<dyn Write>> = if params.refined_graph_out.is_empty() {
+    let mut graph_out: io::BufWriter<Box<dyn Write>> = if params.refined_graph_out.is_empty() {
         if params.graph.ends_with(".gz") {
             log::info!("writing compressed refined graph to standard out");
-            io::BufWriter::new(Box::new(GzEncoder::new(std::io::stdout(), Compression::new(5))))
+            io::BufWriter::new(Box::new(GzEncoder::new(
+                std::io::stdout(),
+                Compression::new(5),
+            )))
         } else {
             log::info!("writing refined graph to standard out");
             io::BufWriter::new(Box::new(std::io::stdout()))
         }
+    } else if params.refined_graph_out.ends_with(".gz") {
+        log::info!(
+            "writing compressed refined graph to {}",
+            params.refined_graph_out
+        );
+        io::BufWriter::new(Box::new(GzEncoder::new(
+            fs::File::create(params.refined_graph_out.clone())?,
+            Compression::new(5),
+        )))
     } else {
-        if params.refined_graph_out.ends_with(".gz") {
-            log::info!("writing compressed refined graph to {}", params.refined_graph_out);
-            io::BufWriter::new(Box::new(GzEncoder::new(fs::File::create(params.refined_graph_out.clone())?, Compression::new(5))))
-        } else {
-            log::info!("writing refined graph to {}", params.refined_graph_out);
-            io::BufWriter::new(Box::new(fs::File::create(params.refined_graph_out.clone())?))
-        }
+        log::info!("writing refined graph to {}", params.refined_graph_out);
+        io::BufWriter::new(Box::new(fs::File::create(
+            params.refined_graph_out.clone(),
+        )?))
     };
 
     let f = std::fs::File::open(params.graph.clone()).expect("Error opening file");
@@ -1283,8 +1324,7 @@ fn main() -> Result<(), io::Error> {
     // swap paths back in to produce final output
     std::mem::swap(&mut gfa.paths, &mut paths);
     log::info!("transforming paths+walks");
-    if let Err(e) =
-        parse_and_transform_paths(&gfa, &node_lens, &transform, &walks, &mut graph_out)
+    if let Err(e) = parse_and_transform_paths(&gfa, &node_lens, &transform, &walks, &mut graph_out)
     {
         panic!(
             "unable to write refined GFA path+walk lines to {}: {}",
