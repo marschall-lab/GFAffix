@@ -770,7 +770,7 @@ fn find_and_collapse_walk_preserving_shared_affixes<'a>(
     }
 
     log::info!(
-        "founda nd collapsed {} shared prefixes, {} of which are overlapping, and {} of which are bubbles",
+        "found and collapsed {} shared prefixes, {} of which are overlapping, and {} of which are bubbles",
         event_tracker.events,
         event_tracker.overlapping_events,
         event_tracker.bubbles
