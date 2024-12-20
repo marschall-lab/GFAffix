@@ -56,8 +56,8 @@ pub struct Command {
     #[clap(
         short = 'o',
         long = "output_refined",
-        help = "Write refined graph in GFA1 format to supplied file",
-        default_value = " "
+        help = "Write refined graph output (GFA1 format) to supplied file instead of stdout",
+        default_value = "" 
     )]
     pub refined_graph_out: String,
 
@@ -65,22 +65,30 @@ pub struct Command {
         short = 't',
         long = "output_transformation",
         help = "Report original nodes and their corresponding walks in refined graph to supplied file",
-        default_value = " "
+        default_value = "" 
     )]
     pub transformation_out: String,
 
     #[clap(
         short = 'c',
         long = "check_transformation",
-        help = "Verifies that the transformed parts of the graphs spell out the identical sequence as in the original graph"
+        help = "Verifies that the transformed parts of the graphs spell out the identical sequence as in the original graph",
     )]
     pub check_transformation: bool,
+
+    #[clap(
+        short = 'a',
+        long = "output_affixes",
+        help = "Report identified affixes",
+        default_value = "" 
+    )]
+    pub affixes_out: String,
 
     #[clap(
         short = 'x',
         long = "dont_collapse",
         help = "Do not collapse nodes on a given paths (\"P\" lines) that match given regular expression",
-        default_value = " "
+        default_value = "" 
     )]
     pub no_collapse_path: String,
 
@@ -552,6 +560,7 @@ fn find_affected_nodes(graph: &HashGraph, del_subg: &DeletedSubGraph, v: Handle)
 fn find_collapsible_blunt_end_pair(
     graph: &HashGraph,
     del_subg: &DeletedSubGraph,
+    dont_collapse_nodes: &FxIndexSet<Node>,
     v: Handle,
 ) -> Option<Handle> {
     if del_subg.node_deleted(&v) || graph.degree(v, Direction::Left) > 0 {
@@ -566,7 +575,12 @@ fn find_collapsible_blunt_end_pair(
                 } else {
                     graph.neighbors(u, Direction::Left).find(|&w| {
                         !del_subg.node_deleted(&w)
+                            && !del_subg.edge_deleted(&w, &u)
                             && w != v
+                            && !(dont_collapse_nodes
+                                .contains(&(w.unpack_number() as usize, graph.node_len(w)))
+                                && dont_collapse_nodes
+                                    .contains(&(v.unpack_number() as usize, graph.node_len(v))))
                             && get_shared_prefix(&[w.flip(), v.flip()], graph)
                                 .unwrap()
                                 .len()
@@ -595,7 +609,15 @@ fn find_and_collapse_blunt_ends(
     while !queue.is_empty() {
         let collapsible_blunts: Vec<(Handle, Handle)> = queue
             .par_iter()
-            .filter_map(|&v| find_collapsible_blunt_end_pair(graph, del_subg, v).map(|u| (v, u)))
+            .filter_map(|&v| {
+                find_collapsible_blunt_end_pair(
+                    graph,
+                    del_subg,
+                    event_tracker.dont_collapse_nodes,
+                    v,
+                )
+                .map(|u| (v, u))
+            })
             .collect();
 
         let mut modified_nodes: FxHashSet<Handle> = FxHashSet::default();
@@ -605,11 +627,6 @@ fn find_and_collapse_blunt_ends(
                 // we only need to re-assess the blunt end
                 new_queue.push(v);
             } else {
-                log::debug!(
-                    "found collapsible blunt end pair {}, {}",
-                    v2str(&v),
-                    v2str(&u)
-                );
                 // remove *one* character, because VG assumes that each chromosome starts with a
                 // left-degree 0 node
                 let prefix = String::from_utf8({
@@ -619,6 +636,20 @@ fn find_and_collapse_blunt_ends(
                 })
                 .unwrap();
                 if !prefix.is_empty() {
+                    log::debug!(
+                        "found collapsible blunt end node {} of length {} matching prefix {}",
+                        v2str(&v),
+                        prefix.len() + 1,
+                        v2str(&u)
+                    );
+                    // parent set is not potentially not identical, but we need to make it so that
+                    // it works
+                    // TODO
+//                    for graph.neighbors(v, Direction::Right) {
+//                            .is_subset(&HashSet::from_iter(
+//                                graph.neighbors(w, Direction::Right),
+//                            ))
+//                    }
                     collapse(
                         graph,
                         &AffixSubgraph {
@@ -1064,12 +1095,11 @@ fn parse_gfa_v12<R: io::Read>(
 }
 
 fn main() -> Result<(), io::Error> {
-    // print output to stdout
-    let mut out = io::BufWriter::new(std::io::stdout());
 
     // initialize command line parser & parse command line arguments
     let params = Command::parse();
 
+    // set up logging
     env_logger::Builder::from_env(Env::default().default_filter_or(if params.verbose {
         "debug"
     } else {
@@ -1077,21 +1107,22 @@ fn main() -> Result<(), io::Error> {
     }))
     .init();
 
+    // set up parallelization
     if params.threads > 0 {
-        log::info!("running panacus on {} threads", &params.threads);
+        log::info!("running gfaffix on {} threads", &params.threads);
         rayon::ThreadPoolBuilder::new()
             .num_threads(params.threads)
             .build_global()
             .unwrap();
     } else {
-        log::info!("running panacus using all available CPUs");
+        log::info!("running gfaffix using all available CPUs");
         rayon::ThreadPoolBuilder::new().build_global().unwrap();
     }
 
     // check if regex of no_collapse_path is valid
-    if !params.no_collapse_path.trim().is_empty() && Regex::new(&params.no_collapse_path).is_err() {
+    if !params.no_collapse_path.is_empty() && Regex::new(&params.no_collapse_path).is_err() {
         panic!(
-            "Supplied string \"{}\" is not a valid regular expression",
+            "supplied string \"{}\" is not a valid regular expression",
             params.no_collapse_path
         );
     }
@@ -1123,7 +1154,7 @@ fn main() -> Result<(), io::Error> {
     }
 
     let mut dont_collapse_nodes: FxIndexSet<Node> = FxIndexSet::default();
-    if !params.no_collapse_path.trim().is_empty() {
+    if !params.no_collapse_path.is_empty() {
         let re = Regex::new(&params.no_collapse_path).unwrap();
         for path in paths.iter() {
             let path_name = str::from_utf8(&path.path_name[..]).unwrap();
@@ -1143,33 +1174,38 @@ fn main() -> Result<(), io::Error> {
     }
 
     log::info!("identifying walk-preserving shared affixes");
-    // yes, that's a "prefix", not an affix--because nodes are oriented accordingly
-    writeln!(
-        out,
-        "{}",
-        [
-            "oriented_parent_nodes",
-            "oriented_child_nodes",
-            "prefix_length",
-            "prefix",
-        ]
-        .join("\t")
-    )?;
-
     let (affixes, mut del_subg, mut event_tracker) =
         find_and_collapse_walk_preserving_shared_affixes(&mut graph, &mut dont_collapse_nodes);
 
-    log::info!("identifying walk-preserving blunt ends");
-    find_and_collapse_blunt_ends(&mut graph, &mut del_subg, &mut event_tracker);
-
-    for affix in affixes {
-        print(&affix, &mut out)?;
+    if !params.affixes_out.is_empty() {
+        log::info!("writing affixes to {}", params.affixes_out);
+        let mut aff_out = io::BufWriter::new(fs::File::create(params.affixes_out.clone())?);
+        // yes, that's a "prefix", not an affix--because nodes are oriented accordingly
+        writeln!(
+            aff_out,
+            "{}",
+            [
+                "oriented_parent_nodes",
+                "oriented_child_nodes",
+                "prefix_length",
+                "prefix",
+            ]
+            .join("\t")
+        )?;
+        for affix in affixes {
+            print(&affix, &mut aff_out)?;
+        }
     }
 
     if !event_tracker.dont_collapse_nodes.is_empty() {
         log::info!("de-collapse no-collapse handles and update transformation table");
         event_tracker.decollapse(&mut graph, &mut del_subg);
     }
+
+    // a blunt-end collapse is a non-symmetric operation, which cannot be reversed easily,
+    // therefore we do this after decollapse (and make sure that we don't collapse reference nodes)
+    log::info!("identifying walk-preserving blunt ends");
+    find_and_collapse_blunt_ends(&mut graph, &mut del_subg, &mut event_tracker);
 
     log::info!("expand transformation table");
     let transform = event_tracker.get_expanded_transformation();
@@ -1182,7 +1218,7 @@ fn main() -> Result<(), io::Error> {
         log::info!("all correct!");
     }
 
-    if !params.transformation_out.trim().is_empty() {
+    if !params.transformation_out.is_empty() {
         log::info!("writing transformations to {}", params.transformation_out);
         let mut trans_out =
             io::BufWriter::new(fs::File::create(params.transformation_out.clone())?);
@@ -1191,40 +1227,46 @@ fn main() -> Result<(), io::Error> {
         }
     }
 
-    if !params.refined_graph_out.trim().is_empty() {
-        log::info!("writing refined graph to {}", params.refined_graph_out);
-        let mut graph_out = io::BufWriter::new(fs::File::create(params.refined_graph_out.clone())?);
-        let data = io::BufReader::new(fs::File::open(&params.graph)?);
-        let header = parse_header(data)?;
-        writeln!(
-            graph_out,
-            "{}",
-            if header.is_empty() {
-                "H\tVN:Z:1.1"
-            } else {
-                str::from_utf8(&header[..]).unwrap()
-            }
-        )?;
-        if let Err(e) = print_active_subgraph(&graph, &del_subg, &mut graph_out) {
-            panic!(
-                "unable to write refined graph to {}: {}",
-                params.refined_graph_out, e
-            );
-        }
 
-        // swap paths back in to produce final output
-        std::mem::swap(&mut gfa.paths, &mut paths);
-        log::info!("transforming paths+walks");
-        if let Err(e) =
-            parse_and_transform_paths(&gfa, &node_lens, &transform, &walks, &mut graph_out)
-        {
-            panic!(
-                "unable to write refined GFA path+walk lines to {}: {}",
-                params.refined_graph_out, e
-            );
-        };
+    // set up graph output stream 
+    let mut graph_out : io::BufWriter<Box<dyn Write>> = if params.refined_graph_out.is_empty() {
+        log::info!("writing refined graph to standard out");
+        io::BufWriter::new(Box::new(std::io::stdout()))
+    } else {
+        log::info!("writing refined graph to {}", params.refined_graph_out);
+        io::BufWriter::new(Box::new(fs::File::create(params.refined_graph_out.clone())?))
+    };
+
+    let data = io::BufReader::new(fs::File::open(&params.graph)?);
+    let header = parse_header(data)?;
+    writeln!(
+        graph_out,
+        "{}",
+        if header.is_empty() {
+            "H\tVN:Z:1.1"
+        } else {
+            str::from_utf8(&header[..]).unwrap()
+        }
+    )?;
+    if let Err(e) = print_active_subgraph(&graph, &del_subg, &mut graph_out) {
+        panic!(
+            "unable to write refined graph to {}: {}",
+            params.refined_graph_out, e
+        );
     }
-    out.flush()?;
+
+    // swap paths back in to produce final output
+    std::mem::swap(&mut gfa.paths, &mut paths);
+    log::info!("transforming paths+walks");
+    if let Err(e) =
+        parse_and_transform_paths(&gfa, &node_lens, &transform, &walks, &mut graph_out)
+    {
+        panic!(
+            "unable to write refined GFA path+walk lines to {}: {}",
+            params.refined_graph_out, e
+        );
+    };
+    graph_out.flush()?;
     log::info!("done");
     Ok(())
 }
