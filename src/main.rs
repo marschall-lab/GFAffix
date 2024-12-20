@@ -2,13 +2,14 @@
 use std::collections::{HashSet, VecDeque};
 use std::error::Error;
 use std::fs;
-use std::io;
 use std::io::prelude::*;
+use std::io;
 use std::iter::FromIterator;
 use std::str;
 
 /* crate use */
 use clap::{crate_version, Parser};
+use flate2::{read::MultiGzDecoder, write::GzEncoder, Compression};
 use env_logger::Env;
 use gfa::{
     gfa::{orientation::Orientation, GFA},
@@ -50,13 +51,13 @@ type Node = (usize, usize);
     about = "Discover and collapse walk-preserving shared affixes of a given variation graph."
 )]
 pub struct Command {
-    #[clap(index = 1, help = "graph in GFA1 format", required = true)]
+    #[clap(index = 1, help = "graph in GFA1 format, supports compressed (.gz) input", required = true)]
     pub graph: String,
 
     #[clap(
         short = 'o',
         long = "output_refined",
-        help = "Write refined graph output (GFA1 format) to supplied file instead of stdout",
+        help = "Write refined graph output (GFA1 format) to supplied file instead of stdout; if file name ends with .gz, output will be compressed",
         default_value = "" 
     )]
     pub refined_graph_out: String,
@@ -1127,8 +1128,17 @@ fn main() -> Result<(), io::Error> {
         );
     }
 
-    log::info!("loading graph {}", &params.graph);
-    let (mut gfa, walks) = parse_gfa_v12(io::BufReader::new(fs::File::open(&params.graph)?));
+    log::info!("loading graph from {}", &params.graph);
+
+    let f = std::fs::File::open(params.graph.clone()).expect("Error opening file");
+    let reader: Box<dyn Read> = if params.graph.ends_with(".gz") {
+        log::info!("assuming that {} is gzip compressed..", &params.graph);
+        Box::new(MultiGzDecoder::new(f))
+    } else {
+        Box::new(f)
+    };
+    
+    let (mut gfa, walks) = parse_gfa_v12(io::BufReader::new(reader));
 
     //
     // REMOVING PATHS FROM GRAPH -- they SUBSTANTIALLY slow down graph editing
@@ -1228,17 +1238,32 @@ fn main() -> Result<(), io::Error> {
     }
 
 
-    // set up graph output stream 
+    // set up graph output stream
     let mut graph_out : io::BufWriter<Box<dyn Write>> = if params.refined_graph_out.is_empty() {
-        log::info!("writing refined graph to standard out");
-        io::BufWriter::new(Box::new(std::io::stdout()))
+        if params.graph.ends_with(".gz") {
+            log::info!("writing compressed refined graph to standard out");
+            io::BufWriter::new(Box::new(GzEncoder::new(std::io::stdout(), Compression::new(5))))
+        } else {
+            log::info!("writing refined graph to standard out");
+            io::BufWriter::new(Box::new(std::io::stdout()))
+        }
     } else {
-        log::info!("writing refined graph to {}", params.refined_graph_out);
-        io::BufWriter::new(Box::new(fs::File::create(params.refined_graph_out.clone())?))
+        if params.refined_graph_out.ends_with(".gz") {
+            log::info!("writing compressed refined graph to {}", params.refined_graph_out);
+            io::BufWriter::new(Box::new(GzEncoder::new(fs::File::create(params.refined_graph_out.clone())?, Compression::new(5))))
+        } else {
+            log::info!("writing refined graph to {}", params.refined_graph_out);
+            io::BufWriter::new(Box::new(fs::File::create(params.refined_graph_out.clone())?))
+        }
     };
 
-    let data = io::BufReader::new(fs::File::open(&params.graph)?);
-    let header = parse_header(data)?;
+    let f = std::fs::File::open(params.graph.clone()).expect("Error opening file");
+    let reader: Box<dyn Read> = if params.graph.ends_with(".gz") {
+        Box::new(MultiGzDecoder::new(f))
+    } else {
+        Box::new(f)
+    };
+    let header = parse_header(io::BufReader::new(reader))?;
     writeln!(
         graph_out,
         "{}",
