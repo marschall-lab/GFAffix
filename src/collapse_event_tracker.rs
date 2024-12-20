@@ -10,24 +10,24 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 /* project use */
 use crate::deleted_sub_graph::DeletedSubGraph;
-use crate::{v2str, v2tuple, FxIndexMap, FxIndexSet};
+use crate::{v2str, FxIndexMap, FxIndexSet, Node, OrientedNode};
 
 #[derive(Debug)]
 pub struct CollapseEventTracker<'a> {
     // tranform from (node_id, node_len) -> [(node_id, node_orient, node_len), ..]
     //                ^ keys are always forward oriented
-    pub transform: FxIndexMap<(usize, usize), Vec<(usize, Direction, usize)>>,
+    pub transform: FxIndexMap<Node, Vec<OrientedNode>>,
     // if there are non-collapse nodes that could be nevertheless collapsed (and then must be
     // de-collapsed in a subsequent step, we need to know these nodes, also those that are
     // constructed during de-collapse. If they are eventually
     // collapsed, we record their incident edges for the decollapse procedure
-    pub dont_collapse_nodes: &'a mut FxIndexSet<(usize, usize)>,
-    pub dont_collapse_nodes_lastorig: Option<(usize, usize)>,
+    pub dont_collapse_nodes: &'a mut FxIndexSet<Node>,
+    pub dont_collapse_nodes_lastorig: Option<Node>,
     //   key: original node--because trait struct Direction does not support the Hash trait, we
     //        need to store the orientation as boolean, indicating whether the node is reversed
     //        (=>true)
     // value: right-side neighboring original nodes
-    pub dont_collapse_edges: FxHashMap<(usize, bool, usize), Vec<(usize, Direction, usize)>>,
+    pub dont_collapse_edges: FxHashMap<(usize, bool, usize), Vec<OrientedNode>>,
     //   key: original node--because trait struct Direction does not support the Hash trait, we
     //        need to store the orientation as boolean, indicating whether the node is reversed
     //        (=>true)
@@ -36,7 +36,7 @@ pub struct CollapseEventTracker<'a> {
     // For each group (identifier == position), a list of siblings is stored that have been jointly
     // collappsed. These can be used in combination with dont_collapse_edges to restore the
     // original edes of the graph
-    pub dont_collapse_siblings_members: Vec<Vec<(usize, Direction, usize)>>,
+    pub dont_collapse_siblings_members: Vec<Vec<OrientedNode>>,
     pub overlapping_events: usize,
     pub bubbles: usize,
     pub events: usize,
@@ -47,7 +47,7 @@ pub struct CollapseEventTracker<'a> {
 impl<'a> CollapseEventTracker<'a> {
     pub fn retain_dont_collapse_edges(
         &mut self,
-        original_blunt_edges: Vec<((usize, Direction, usize), Vec<(usize, Direction, usize)>)>,
+        original_blunt_edges: Vec<(OrientedNode, Vec<OrientedNode>)>,
     ) {
         log::debug!(
             "storing right-side edges of to-be-collapsed siblings {}",
@@ -116,7 +116,7 @@ impl<'a> CollapseEventTracker<'a> {
             // record transformation of node, even if none took place (which is the case if node v
             // equals the dedicated shared prefix node, but make sure it's then in synced
             // orientation
-            let mut replacement: Vec<(usize, Direction, usize)> = vec![(
+            let mut replacement: Vec<OrientedNode> = vec![(
                 prefix_id,
                 if node_id == &prefix_id && node_len == &prefix_len {
                     *node_orient
@@ -179,8 +179,8 @@ impl<'a> CollapseEventTracker<'a> {
         node_id: usize,
         node_orient: Direction,
         node_len: usize,
-    ) -> Vec<(usize, Direction, usize)> {
-        let mut res: Vec<(usize, Direction, usize)> = Vec::new();
+    ) -> Vec<OrientedNode> {
+        let mut res: Vec<OrientedNode> = Vec::new();
 
         if self.transform.contains_key(&(node_id, node_len)) {
             for (rid, rorient, rlen) in self.transform.get(&(node_id, node_len)).unwrap() {
@@ -207,11 +207,8 @@ impl<'a> CollapseEventTracker<'a> {
         res
     }
 
-    pub fn get_expanded_transformation(
-        &self,
-    ) -> FxHashMap<(usize, usize), Vec<(usize, Direction, usize)>> {
-        let mut res: FxHashMap<(usize, usize), Vec<(usize, Direction, usize)>> =
-            FxHashMap::default();
+    pub fn get_expanded_transformation(&self) -> FxHashMap<Node, Vec<OrientedNode>> {
+        let mut res: FxHashMap<Node, Vec<OrientedNode>> = FxHashMap::default();
         res.reserve(self.transform.len());
 
         for (node_id, node_len) in self.transform.keys() {
@@ -249,24 +246,16 @@ impl<'a> CollapseEventTracker<'a> {
         res
     }
 
-    pub fn get_collapsed_nodes(
-        &self,
-        graph: &HashGraph,
-        del_subg: &DeletedSubGraph,
-    ) -> Vec<((usize, usize), (usize, usize))> {
+    pub fn get_collapsed_nodes(&self) -> Vec<(Node, Node)> {
         // returns a list of (duplicated node, rule)-tuples that are sorted in the order in which the de-collapse must be carried out
-        let mut locus_tags: FxHashMap<(usize, usize), Vec<(usize, usize)>> = FxHashMap::default();
+        let mut locus_tags: FxHashMap<Node, Vec<Node>> = FxHashMap::default();
 
         for v in self.dont_collapse_nodes.iter() {
             // remember that transform is an FxIndexMap, so, we are iterating through transform in
             // the order in which the nodes were added
             if self.transform.contains_key(v) {
                 for u in self.expand(v.0, Direction::Right, v.1) {
-                    let u_handle = Handle::pack(u.0, false);
-                    locus_tags
-                        .entry((u.0, u.2))
-                        .or_insert_with(|| Vec::new())
-                        .push((v.0, v.1));
+                    locus_tags.entry((u.0, u.2)).or_default().push((v.0, v.1));
                 }
             }
             // only iterate over original nodes
@@ -278,10 +267,9 @@ impl<'a> CollapseEventTracker<'a> {
             }
         }
 
-        let mut counts: FxHashMap<(usize, usize), usize> = FxHashMap::default();
+        let mut counts: FxHashMap<Node, usize> = FxHashMap::default();
 
-        let mut rules_with_dupls: FxHashMap<(usize, usize), Vec<(usize, usize)>> =
-            FxHashMap::default();
+        let mut rules_with_dupls: FxHashMap<Node, Vec<Node>> = FxHashMap::default();
         for (dupl, rules) in locus_tags {
             if rules.len() > 1 {
                 log::debug!(
@@ -299,18 +287,30 @@ impl<'a> CollapseEventTracker<'a> {
                 for rule in rules {
                     // it's not possible to de-collapse an "identity" transformation rule
                     if rule != dupl {
-                        rules_with_dupls
-                            .entry(rule)
-                            .or_insert(Vec::new())
-                            .push(dupl);
+                        rules_with_dupls.entry(rule).or_default().push(dupl);
                     }
                 }
             }
         }
 
-        log::debug!("rules_with_dupls: \n{}", rules_with_dupls.iter().map(|(k, v)| format!(">{}:{} -> {}", k.0, k.1, v.iter().map(|x| format!(">{}:{}", x.0, x.1)).collect::<Vec<String>>().join(","))).collect::<Vec<String>>().join("\n"));
+        log::debug!(
+            "rules_with_dupls: \n{}",
+            rules_with_dupls
+                .iter()
+                .map(|(k, v)| format!(
+                    ">{}:{} -> {}",
+                    k.0,
+                    k.1,
+                    v.iter()
+                        .map(|x| format!(">{}:{}", x.0, x.1))
+                        .collect::<Vec<String>>()
+                        .join(",")
+                ))
+                .collect::<Vec<String>>()
+                .join("\n")
+        );
 
-        let mut res: Vec<((usize, usize), (usize, usize))> = Vec::new();
+        let mut res: Vec<(Node, Node)> = Vec::new();
         for (v, rule) in self.transform.iter() {
             if let Some(dupls) = rules_with_dupls.get(v).cloned() {
                 for dupl in dupls {
@@ -320,10 +320,7 @@ impl<'a> CollapseEventTracker<'a> {
                                 res.push((dupl, *v));
                                 counts.entry(dupl).and_modify(|c| *c -= 1);
                             } else if u.2 >= dupl.1 {
-                                rules_with_dupls
-                                    .entry((u.0, u.2))
-                                    .or_insert(Vec::new())
-                                    .push(dupl);
+                                rules_with_dupls.entry((u.0, u.2)).or_default().push(dupl);
                             }
                         }
                     }
@@ -351,9 +348,10 @@ impl<'a> CollapseEventTracker<'a> {
         graph: &mut HashGraph,
         del_subg: &mut DeletedSubGraph,
     ) -> Vec<usize> {
-        let node2rule = self.get_collapsed_nodes(graph, del_subg);
-        let mut decollapse_count = 0;
-        let mut decollapsed_blunt_siblings: FxHashMap<(usize, usize), FxHashSet<usize>> =
+        let mut res = Vec::new();
+
+        let node2rule = self.get_collapsed_nodes();
+        let mut decollapsed_blunt_siblings: FxHashMap<Node, FxHashSet<usize>> =
             FxHashMap::default();
         for ((vid, vlen), u) in node2rule.into_iter() {
             match self.transform[&u][..] {
@@ -393,9 +391,7 @@ impl<'a> CollapseEventTracker<'a> {
                     let y = self.decollapse_blunt_node(
                         (wid, worient, wlen),
                         u,
-                        &mut decollapsed_blunt_siblings
-                            .entry((vid, vlen))
-                            .or_insert_with(|| FxHashSet::default()),
+                        decollapsed_blunt_siblings.entry((vid, vlen)).or_default(),
                         graph,
                         del_subg,
                     );
@@ -414,6 +410,7 @@ impl<'a> CollapseEventTracker<'a> {
                             (y.unpack_number() as usize, Direction::Right, wlen),
                         ],
                     );
+                    res.push(y.unpack_number() as usize);
                 }
                 [(wid, worient, wlen), (xid, xorient, xlen)] => {
                     log::debug!(
@@ -466,6 +463,7 @@ impl<'a> CollapseEventTracker<'a> {
                         self.transform.entry(u).and_modify(|x| {
                             x[0] = (y.unpack_number() as usize, Direction::Right, wlen)
                         });
+                        res.push(y.unpack_number() as usize);
                     } else {
                         assert!(
                             vid == xid && vlen == xlen,
@@ -477,8 +475,7 @@ impl<'a> CollapseEventTracker<'a> {
                         );
                         // make sure the suffix node is *real*
                         let (oid, oorient, olen) = (wid, worient, wlen);
-                        let (wid, worient, wlen) =
-                            self.expand(wid, worient, wlen).last().unwrap().clone();
+                        let (wid, worient, wlen) = *self.expand(wid, worient, wlen).last().unwrap();
                         // either the rule is in forward direction (then it is covered by
                         // the if-case), or it is in reverse direction (else)
                         let y = self.decollapse_prefix(
@@ -519,33 +516,32 @@ impl<'a> CollapseEventTracker<'a> {
                         self.transform.entry(u).and_modify(|x| {
                             x[1] = (y.unpack_number() as usize, Direction::Left, xlen)
                         });
+                        res.push(y.unpack_number() as usize);
                     }
                 }
                 [] | [_, _, _, ..] => unreachable!(),
             }
         }
 
-        log::info!("decollapsed {} nodes", decollapse_count);
-        let mut res = Vec::new();
-
+        log::info!("decollapsed {} nodes", res.len());
         res
     }
 
     fn decollapse_prefix(
         &self,
-        u: (usize, Direction, usize),
-        v: (usize, Direction, usize),
+        u: OrientedNode,
+        v: OrientedNode,
         graph: &mut HashGraph,
         del_subg: &mut DeletedSubGraph,
     ) -> Handle {
-        let (uid, uorient, ulen) = u;
+        let (uid, uorient, _ulen) = u;
         let u = Handle::pack(uid, uorient == Direction::Left);
-        let (vid, vorient, vlen) = v;
+        let (vid, vorient, _vlen) = v;
         let v = Handle::pack(vid, vorient == Direction::Left);
 
         // assumes that the original node is split into two parts, where the first part, u, must
         // now be de-collapsed.
-        let mut w = graph.append_handle(&graph.sequence_vec(u)[..]);
+        let w = graph.append_handle(&graph.sequence_vec(u)[..]);
         log::debug!("++ creating duplicate {} of node {}", v2str(&w), v2str(&u),);
         // copy left-incident edges of u onto w
 
@@ -573,16 +569,13 @@ impl<'a> CollapseEventTracker<'a> {
 
         graph.create_edge(Edge::edge_handle(w, v));
 
-        //        log::debug!("flagging edge {}{} as deleted during decollapse of node {}", v2str(&u), v2str(&v), v2str(&u));
-        //        del_subg.add_edge(Edge::edge_handle(u, v));
-
         w
     }
 
     pub fn decollapse_blunt_node(
         &self,
-        v: (usize, Direction, usize),
-        u: (usize, usize),
+        v: OrientedNode,
+        u: Node,
         decollapsed_blunt_siblings: &mut FxHashSet<usize>,
         graph: &mut HashGraph,
         del_subg: &mut DeletedSubGraph,
@@ -641,7 +634,7 @@ impl<'a> CollapseEventTracker<'a> {
                             .iter()
                         {
                             // get transformed neighbor
-                            let (yid, yorient, ylen) = self.expand(*yid, *yorient, *ylen)[0];
+                            let (yid, yorient, _ylen) = self.expand(*yid, *yorient, *ylen)[0];
                             // What if neighboring edge points back to original node?
                             let y = if yid == uid {
                                 Handle::pack(x.unpack_number(), yorient != uorient)
@@ -671,7 +664,7 @@ impl<'a> CollapseEventTracker<'a> {
                             [&(s.0, s.1 == Direction::Left, s.2)]
                             .iter()
                             .map(|(yid, yorient, ylen)| {
-                                let (yid, yorient, ylen) = self.expand(*yid, *yorient, *ylen)[0];
+                                let (yid, yorient, _ylen) = self.expand(*yid, *yorient, *ylen)[0];
                                 // this is about *keeping* edges, so if the neighboring edge
                                 // points back to the original node, it's just fine
                                 Handle::pack(yid, yorient == Direction::Left)
@@ -736,11 +729,11 @@ impl<'a> CollapseEventTracker<'a> {
         x.flip()
     }
 
-    pub fn new(dont_collapse_nodes: &'a mut FxIndexSet<(usize, usize)>) -> Self {
+    pub fn new(dont_collapse_nodes: &'a mut FxIndexSet<Node>) -> Self {
         let last = dont_collapse_nodes.iter().last().cloned();
         CollapseEventTracker {
             transform: FxIndexMap::default(),
-            dont_collapse_nodes: dont_collapse_nodes,
+            dont_collapse_nodes,
             dont_collapse_nodes_lastorig: last,
             dont_collapse_edges: FxHashMap::default(),
             dont_collapse_siblings_group: FxHashMap::default(),
@@ -751,33 +744,4 @@ impl<'a> CollapseEventTracker<'a> {
             modified_nodes: FxHashSet::default(),
         }
     }
-
-    //    pub fn merge(event_trackers: Vec<Self>) -> Self {
-    //        assert!(
-    //            event_trackers.len() > 0,
-    //            "assumed non-empty list of event trackers"
-    //        );
-    //        let mut res =
-    //            CollapseEventTracker::new(event_trackers.first().unwrap().dont_collapse_nodes);
-    //
-    //        for x in event_trackers {
-    //            assert!(
-    //                x.transform.keys().all(|x| !res.transform.contains_key(x)),
-    //                "assumed transformations are disjoint"
-    //            );
-    //            res.transform.extend(x.transform.into_iter());
-    //            res.dont_collapse_edges
-    //                .extend(x.dont_collapse_edges.into_iter());
-    //            res.dont_collapse_siblings_group
-    //                .extend(x.dont_collapse_siblings_group.into_iter());
-    //            res.dont_collapse_siblings_members
-    //                .extend(x.dont_collapse_siblings_members.into_iter());
-    //            res.overlapping_events += x.overlapping_events;
-    //            res.bubbles += x.bubbles;
-    //            res.events += x.events;
-    //            res.modified_nodes.extend(x.modified_nodes.into_iter());
-    //        }
-    //
-    //        res
-    //    }
 }

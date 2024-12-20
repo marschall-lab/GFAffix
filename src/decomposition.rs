@@ -2,7 +2,7 @@ use std::cmp::min;
 use std::iter::FromIterator;
 
 use handlegraph::{
-    handle::{Direction, Edge, Handle, NodeId},
+    handle::{Direction, Handle, NodeId},
     handlegraph::{HandleGraph, IntoHandles, IntoNeighbors, IntoSequences},
     hashgraph::HashGraph,
 };
