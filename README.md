@@ -61,6 +61,7 @@ tar -xzvf GFAffix-0.2.0_macos_x_arm64.tar.gz
 git clone https://github.com/marschall-lab/GFAffix.git
 # build program
 cargo build --manifest-path GFAffix/Cargo.toml --release
+# built binary is located at GFAffix/target/release/gfaffix
 ```
 
 ## Command Line Interface
@@ -102,5 +103,5 @@ Options:
 ## Execution
 
 ```
-gfaffix examples/example1.gfa -o example1.gfa > example1.gfaffixed.gfa
+gfaffix -c examples/example1.gfa -o example1.gfa > example1.gfaffixed.gfa
 ```
