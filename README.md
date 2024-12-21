@@ -13,10 +13,12 @@ GFAffix identifies walk-preserving shared affixes in variation graphs and collap
 It makes use of the following crates:
 * clap
 * env\_logger
+* flate2
 * gfa
 * handlegraph
+* indexmap
 * log
-* quick-csv
+* rayon
 * regex
 * rustc-hash
 
@@ -24,10 +26,10 @@ It makes use of the following crates:
 
 ### From bioconda channel
 
-Make sure you have [conda](https://conda.io) installed!
+Make sure you have [conda](https://conda.io)/[mamba](https://anaconda.org/conda-forge/mamba) installed!
 
 ```
-conda install -c bioconda gfaffix
+mamba install -c conda-forge -c bioconda gfaffix
 ```
 
 ### From binary release
@@ -35,27 +37,21 @@ conda install -c bioconda gfaffix
 #### Linux x86\_64
 
 ```
-
-wget --no-check-certificate -c https://github.com/marschall-lab/GFAffix/releases/download/0.1.5b/GFAffix-0.1.5b_linux_x86_64.tar.gz 
-tar -xzvf GFAffix-0.1.5b_linux_x86_64.tar.gz 
+wget --no-check-certificate -c https://github.com/marschall-lab/GFAffix/releases/download/0.2.0/GFAffix-0.2.0_linux_x86_64.tar.gz 
+tar -xzvf GFAffix-0.2.0_linux_x86_64.tar.gz 
 
 # you are ready to go! 
-./GFAffix-0.1.5b_linux_x86_64/gfaffix
-
-
+./GFAffix-0.2.0_linux_x86_64/gfaffix
 ```
 
 #### MacOS X arm64
 
 ```
-
-wget --no-check-certificate -c https://github.com/marschall-lab/GFAffix/releases/download/0.1.5b/GFAffix-0.1.5b_macos_x_arm64.tar.gz 
-tar -xzvf GFAffix-0.1.5b_macos_x_arm64.tar.gz 
+wget --no-check-certificate -c https://github.com/marschall-lab/GFAffix/releases/download/0.2.0/GFAffix-0.2.0_macos_x_arm64.tar.gz 
+tar -xzvf GFAffix-0.2.0_macos_x_arm64.tar.gz 
 
 # you are ready to go! 
-./GFAffix-0.1.5b_macos_x_arm64/gfaffix
-
-
+./GFAffix-0.2.0_macos_x_arm64/gfaffix
 ```
 
 ### From repository
@@ -71,44 +67,40 @@ cargo build --manifest-path GFAffix/Cargo.toml --release
 
 ```
 $ gfaffix --help
-gfaffix 0.1.5b
-Daniel Doerr <daniel.doerr@hhu.de>
-Discover walk-preserving shared prefixes in multifurcations of a given graph.
+Discover and collapse walk-preserving shared affixes of a given variation graph.
 
-    - Do you want log output? Call program with 'RUST_LOG=info gfaffix ...'
-    - Log output not informative enough? Try 'RUST_LOG=debug gfaffix ...'
+Usage: gfaffix [OPTIONS] <GRAPH>
 
-USAGE:
-    gfaffix [OPTIONS] <GRAPH>
+Arguments:
+  <GRAPH>  graph in GFA1 format, supports compressed (.gz) input
 
-ARGS:
-    <GRAPH>    graph in GFA1 format
-
-OPTIONS:
-    -c, --check_transformation
-            Verifies that the transformed parts of the graphs spell out the identical sequence as in
-            the original graph. Only for debugging purposes
-
-    -h, --help
-            Print help information
-
-    -o, --output_refined <REFINED_GRAPH_OUT>
-            Write refined graph in GFA1 format to supplied file [default: " "]
-
-    -t, --output_transformation <TRANSFORMATION_OUT>
-            Report original nodes and their corresponding walks in refined graph to supplied file
-            [default: " "]
-
-    -V, --version
-            Print version information
-
-    -x, --dont_collapse <NO_COLLAPSE_PATH>
-            Do not collapse nodes on a given paths ("P" lines) that match given regular expression
-            [default: " "]
+Options:
+  -o, --output_refined <REFINED_GRAPH_OUT>
+          Write refined graph output (GFA1 format) to supplied file instead of stdout; if file name
+          ends with .gz, output will be compressed [default: ]
+  -t, --output_transformation <TRANSFORMATION_OUT>
+          Report original nodes and their corresponding walks in refined graph to supplied file
+          [default: ]
+  -c, --check_transformation
+          Verifies that the transformed parts of the graphs spell out the identical sequence as in the
+          original graph
+  -a, --output_affixes <AFFIXES_OUT>
+          Report identified affixes [default: ]
+  -x, --dont_collapse <NO_COLLAPSE_PATH>
+          Do not collapse nodes on a given paths/walks ("P"/"W" lines) that match given regular
+          expression [default: ]
+  -p, --threads <THREADS>
+          Run in parallel on N threads [default: 1]
+  -v, --verbose
+          Sets log level to debug
+  -h, --help
+          Print help
+  -V, --version
+          Print version
 ```
 
 ## Execution
 
 ```
-RUST_LOG=info gfaffix examples/example1.gfa -o example1.gfa -t example1.trans > example1.shared_affixes
+gfaffix examples/example1.gfa -o example1.gfa > example1.gfaffixed.gfa
 ```
