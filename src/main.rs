@@ -1166,7 +1166,7 @@ fn main() -> Result<(), io::Error> {
 
     let f = std::fs::File::open(params.graph.clone()).expect("Error opening file");
     let reader: Box<dyn Read> = if params.graph.ends_with(".gz") {
-        log::info!("assuming that {} is gzip compressed..", &params.graph);
+        log::info!("assuming that GFA file is gzip compressed..");
         Box::new(MultiGzDecoder::new(f))
     } else {
         Box::new(f)
