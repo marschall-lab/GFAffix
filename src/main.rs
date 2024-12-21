@@ -924,8 +924,9 @@ fn check_transform(
         // by the affix-reduction
         let v = Handle::pack(*vid, false);
         if old_graph.has_node(v.id()) && old_graph.node_len(v) == *vlen {
-            let old_seq = old_graph.sequence_vec(v);
-            let new_seq = spell_walk(new_graph, path);
+            // make all letters uppercase
+            let old_seq : Vec<u8> = old_graph.sequence_vec(v).into_iter().map(|c| if c > b'Z' { c - 32u8} else { c}).collect();
+            let new_seq : Vec<u8> = spell_walk(new_graph, path).into_iter().map(|c| if c > b'Z' { c - 32u8 } else { c}).collect();
             if old_seq != new_seq {
                 panic!(
                     "node {} in old graph spells sequence {}, but walk {} in new graph spell sequence {}",
