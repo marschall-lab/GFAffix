@@ -1199,6 +1199,11 @@ fn main() -> Result<(), io::Error> {
 
     let mut dont_collapse_nodes: FxIndexSet<Node> = FxIndexSet::default();
     if !params.no_collapse_path.is_empty() {
+        let mut c = 0;
+        log::debug!(
+            "searching for paths matching regular expression \"{}\"..",
+            params.no_collapse_path
+        );
         let re = Regex::new(&params.no_collapse_path).unwrap();
         for path in paths.iter() {
             let path_name = str::from_utf8(&path.path_name[..]).unwrap();
@@ -1208,13 +1213,20 @@ fn main() -> Result<(), io::Error> {
                         .map(|(xid, _)| (xid, *node_lens.get(&xid).unwrap())),
                 );
 
-                log::info!(
+                log::debug!(
                     "flagging nodes of path {} as non-collapsing, total number is now at {}",
                     path_name,
                     dont_collapse_nodes.len()
                 );
+                c += 1;
             }
         }
+        log::info!(
+            "found {} no-collapse-paths with a total number of {} nodes matching regular rexpression \"{}\"",
+            c,
+            dont_collapse_nodes.len(),
+            params.no_collapse_path
+        );
     }
 
     log::info!("identifying walk-preserving shared affixes");
