@@ -113,10 +113,6 @@ pub fn transform_walks(line: Vec<u8>, walk_map: &mut FxHashMap<Vec<u8>, Vec<u8>>
                     ),
                 }
             }
-            log::debug!(
-                "transformed path: {}",
-                std::str::from_utf8(&path[..]).unwrap()
-            );
             let mut transformed: Vec<u8> = Vec::new();
             transformed.push(b'P');
             transformed.push(b'\t');
