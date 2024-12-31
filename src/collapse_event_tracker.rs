@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::iter::FromIterator;
 
 use handlegraph::{
     handle::{Direction, Edge, Handle},
@@ -22,6 +23,10 @@ pub struct CollapseEventTracker<'a> {
     // constructed during de-collapse. If they are eventually
     // collapsed, we record their incident edges for the decollapse procedure
     pub dont_collapse_nodes: &'a mut FxIndexSet<Node>,
+    // because also nodes that are already present in the graph can be flagged as dont-collapse
+    // during collapse (by transitivity), it is important during de-collapse to only decollapse the
+    // *original* set; this set is recovered by iterating only over the first part of the
+    // FxIndexSet until dont_collapse_nodes_lastorig.
     pub dont_collapse_nodes_lastorig: Option<Node>,
     //   key: original node--because trait struct Direction does not support the Hash trait, we
     //        need to store the orientation as boolean, indicating whether the node is reversed
@@ -208,6 +213,7 @@ impl<'a> CollapseEventTracker<'a> {
     }
 
     pub fn get_expanded_transformation(&self) -> FxHashMap<Node, Vec<OrientedNode>> {
+        // returns the expanded transfornation of all original nodes
         let mut res: FxHashMap<Node, Vec<OrientedNode>> = FxHashMap::default();
         res.reserve(self.transform.len());
 
@@ -246,16 +252,17 @@ impl<'a> CollapseEventTracker<'a> {
         res
     }
 
-    pub fn get_collapsed_nodes(&self) -> Vec<(Node, Node)> {
-        // returns a list of (duplicated node, rule)-tuples that are sorted in the order in which the de-collapse must be carried out
-        let mut locus_tags: FxHashMap<Node, Vec<Node>> = FxHashMap::default();
+    pub fn get_locus_tags(&self) -> FxHashMap<Node, Vec<Node>> {
+        // a locus_tag is a rule key that corresponds to the original locus of the collapsed
+        // node-sequence (rule value)
+        let mut res: FxHashMap<Node, Vec<Node>> = FxHashMap::default();
 
         for v in self.dont_collapse_nodes.iter() {
             // remember that transform is an FxIndexMap, so, we are iterating through transform in
             // the order in which the nodes were added
             if self.transform.contains_key(v) {
                 for u in self.expand(v.0, Direction::Right, v.1) {
-                    locus_tags.entry((u.0, u.2)).or_default().push((v.0, v.1));
+                    res.entry((u.0, u.2)).or_default().push((v.0, v.1));
                 }
             }
             // only iterate over original nodes
@@ -266,67 +273,63 @@ impl<'a> CollapseEventTracker<'a> {
                 break;
             }
         }
+        res
+    }
 
-        let mut counts: FxHashMap<Node, usize> = FxHashMap::default();
+    pub fn get_collapsed_nodes(&self) -> Vec<(Node, Node)> {
+        // returns a list of (duplicated node, rule)-tuples that are sorted in the order in which the de-collapse must be carried out
 
-        let mut rules_with_dupls: FxHashMap<Node, Vec<Node>> = FxHashMap::default();
-        for (dupl, rules) in locus_tags {
-            if rules.len() > 1 {
-                log::debug!(
-                    "node >{}:{} shares {} collapsed reference locations: {}",
-                    dupl.0,
-                    dupl.1,
-                    rules.len(),
-                    rules
-                        .iter()
-                        .map(|x| format!(">{}:{}", x.0, x.1))
-                        .collect::<Vec<String>>()
-                        .join(", ")
-                );
-                counts.insert(dupl, rules.len());
-                for rule in rules {
-                    // it's not possible to de-collapse an "identity" transformation rule
-                    if rule != dupl {
-                        rules_with_dupls.entry(rule).or_default().push(dupl);
-                    }
-                }
-            }
-        }
+        let locus_tags: FxHashMap<Node, Vec<Node>> = FxHashMap::from_iter(
+            self.get_locus_tags()
+                .into_iter()
+                .filter(|(_, r)| r.len() > 1),
+        );
+        locus_tags.iter().for_each(|(dupl, rules)| {
+            log::debug!(
+                "node >{}:{} shares {} collapsed reference locations: {}",
+                dupl.0,
+                dupl.1,
+                rules.len(),
+                rules
+                    .iter()
+                    .map(|x| format!(">{}:{}", x.0, x.1))
+                    .collect::<Vec<String>>()
+                    .join(", ")
+            )
+        });
+        let mut counts: FxHashMap<Node, usize> =
+            FxHashMap::from_iter(locus_tags.iter().map(|(&k, v)| (k, v.len())));
 
-        log::debug!(
-            "rules_with_dupls: \n{}",
-            rules_with_dupls
+        // we're only interested in locus tags of duplicated nodes
+        let homologs: FxHashMap<Node, Node> = FxHashMap::from_iter(
+            locus_tags
                 .iter()
-                .map(|(k, v)| format!(
-                    ">{}:{} -> {}",
-                    k.0,
-                    k.1,
-                    v.iter()
-                        .map(|x| format!(">{}:{}", x.0, x.1))
-                        .collect::<Vec<String>>()
-                        .join(",")
-                ))
-                .collect::<Vec<String>>()
-                .join("\n")
+                .map(|((vid, vlen), rules)| {
+                    rules.iter().filter_map(move |(rid, rlen)| {
+                        if vlen == rlen {
+                            Some(((*rid, *rlen), (*vid, *vlen)))
+                        } else {
+                            None
+                        }
+                    })
+                })
+                .flatten(),
         );
 
         let mut res: Vec<(Node, Node)> = Vec::new();
-        for (v, rule) in self.transform.iter() {
-            if let Some(dupls) = rules_with_dupls.get(v).cloned() {
-                for dupl in dupls {
-                    for u in rule {
-                        if counts[&dupl] > 1 {
-                            if u.0 == dupl.0 && u.2 == dupl.1 {
-                                res.push((dupl, *v));
-                                counts.entry(dupl).and_modify(|c| *c -= 1);
-                            } else if u.2 >= dupl.1 {
-                                rules_with_dupls.entry((u.0, u.2)).or_default().push(dupl);
-                            }
-                        }
+        // it is important to preserve the order in which the collapses were made, so that's why we
+        // are iterating over transform (FxIndexMap).
+        for ((vid, vlen), rule) in self.transform.iter() {
+            for (uid, _, ulen) in rule {
+                if let Some(dupl) = homologs.get(&(*uid, *ulen)) {
+                    if vid != uid {
+                        res.push(((*uid, *ulen), (*vid, *vlen)));
+                        counts.entry(*dupl).and_modify(|c| *c -= 1);
                     }
                 }
             }
         }
+
         assert!(
             counts.values().all(|x| *x == 1),
             "get_collapsed_nodes produced either too many decollapses or to few: \n{}",

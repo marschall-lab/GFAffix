@@ -1081,9 +1081,14 @@ fn parse_and_transform_paths<W: io::Write, T: OptFields>(
             let path_name = str::from_utf8(&path.path_name)?;
             log::debug!("transforming path {}", path_name);
             for (sid, o) in path.iter() {
-                for (vid, d) in
-                    transform_node(sid, o, *orig_node_lens.get(&sid).unwrap(), transform)
-                {
+                for (vid, d) in transform_node(
+                    sid,
+                    o,
+                    *orig_node_lens
+                        .get(&sid)
+                        .expect(&format!("cannot obtain size of undeclared node {}", &sid)),
+                    transform,
+                ) {
                     out_b.extend_from_slice(vid.to_string().as_bytes());
                     out_b.push(if d == Direction::Right { b'+' } else { b'-' });
                     out_b.push(b',');
@@ -1228,7 +1233,7 @@ fn main() -> Result<(), io::Error> {
             params.no_collapse_path
         );
     }
-
+    log::debug!("last original node is >{}", graph.max_node_id());
     log::info!("identifying walk-preserving shared affixes");
     let (affixes, mut del_subg, mut event_tracker) =
         find_and_collapse_walk_preserving_shared_affixes(&mut graph, &mut dont_collapse_nodes);
