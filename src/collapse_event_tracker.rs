@@ -305,24 +305,52 @@ impl<'a> CollapseEventTracker<'a> {
             locus_tags
                 .iter()
                 .map(|((vid, vlen), rules)| {
-                    rules.iter().filter_map(move |(rid, rlen)| {
-                        if vlen == rlen {
-                            Some(((*rid, *rlen), (*vid, *vlen)))
-                        } else {
-                            None
-                        }
-                    })
+                    rules
+                        .iter()
+                        .filter_map(move |(rid, rlen)| {
+                            if vlen == rlen {
+                                Some(((*rid, *rlen), (*vid, *vlen)))
+                            } else {
+                                None
+                            }
+                        })
+                        .chain(vec![((*vid, *vlen), (*vid, *vlen))].into_iter())
                 })
                 .flatten(),
+        );
+        log::debug!(
+            "homologs:\n{}",
+            homologs
+                .iter()
+                .map(|(k, v)| format!("{}:{} -> {}:{}", k.0, k.1, v.0, v.1))
+                .collect::<Vec<String>>()
+                .join("\n")
         );
 
         let mut res: Vec<(Node, Node)> = Vec::new();
         // it is important to preserve the order in which the collapses were made, so that's why we
         // are iterating over transform (FxIndexMap).
         for ((vid, vlen), rule) in self.transform.iter() {
+            log::debug!(
+                "iterating through rule {}:{} -> {}",
+                vid,
+                vlen,
+                rule.iter()
+                    .map(|(uid, uo, ulen)| format!(
+                        "{}{}:{}",
+                        match uo {
+                            Direction::Right => ">",
+                            Direction::Left => "<",
+                        },
+                        uid,
+                        ulen
+                    ))
+                    .collect::<Vec<String>>()
+                    .join("")
+            );
             for (uid, _, ulen) in rule {
                 if let Some(dupl) = homologs.get(&(*uid, *ulen)) {
-                    if vid != uid {
+                    if *counts.get(dupl).unwrap() > 1 && vid != uid {
                         res.push(((*uid, *ulen), (*vid, *vlen)));
                         counts.entry(*dupl).and_modify(|c| *c -= 1);
                     }
