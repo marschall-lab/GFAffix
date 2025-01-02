@@ -1084,9 +1084,9 @@ fn parse_and_transform_paths<W: io::Write, T: OptFields>(
                 for (vid, d) in transform_node(
                     sid,
                     o,
-                    *orig_node_lens
-                        .get(&sid)
-                        .expect(&format!("cannot obtain size of undeclared node {}", &sid)),
+                    *orig_node_lens.get(&sid).unwrap_or_else(|| {
+                        panic!("cannot obtain size of undeclared node {}", &sid)
+                    }),
                     transform,
                 ) {
                     out_b.extend_from_slice(vid.to_string().as_bytes());

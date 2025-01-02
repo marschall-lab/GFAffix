@@ -301,23 +301,19 @@ impl<'a> CollapseEventTracker<'a> {
             FxHashMap::from_iter(locus_tags.iter().map(|(&k, v)| (k, v.len())));
 
         // we're only interested in locus tags of duplicated nodes
-        let homologs: FxHashMap<Node, Node> = FxHashMap::from_iter(
-            locus_tags
-                .iter()
-                .map(|((vid, vlen), rules)| {
-                    rules
-                        .iter()
-                        .filter_map(move |(rid, rlen)| {
-                            if vlen == rlen {
-                                Some(((*rid, *rlen), (*vid, *vlen)))
-                            } else {
-                                None
-                            }
-                        })
-                        .chain(vec![((*vid, *vlen), (*vid, *vlen))].into_iter())
-                })
-                .flatten(),
-        );
+        let homologs: FxHashMap<Node, Node> =
+            FxHashMap::from_iter(locus_tags.iter().flat_map(|((vid, vlen), rules)| {
+                rules
+                    .iter()
+                    .filter_map(move |(rid, rlen)| {
+                        if vlen == rlen {
+                            Some(((*rid, *rlen), (*vid, *vlen)))
+                        } else {
+                            None
+                        }
+                    })
+                    .chain(vec![((*vid, *vlen), (*vid, *vlen))])
+            }));
         log::debug!(
             "homologs:\n{}",
             homologs
