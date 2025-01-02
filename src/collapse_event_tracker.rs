@@ -325,7 +325,7 @@ impl<'a> CollapseEventTracker<'a> {
 
         let mut res: Vec<(Node, Node)> = Vec::new();
         // it is important to preserve the order in which the collapses were made, so that's why we
-        // are iterating over transform (FxIndexMap).
+        // are iterating over transform (FxIndexMap) in reversed order.
         for ((vid, vlen), rule) in self.transform.iter().rev() {
             log::debug!(
                 "iterating through rule {}:{} -> {}",
@@ -560,7 +560,7 @@ impl<'a> CollapseEventTracker<'a> {
         graph: &mut HashGraph,
         del_subg: &mut DeletedSubGraph,
     ) -> Handle {
-        let (uid, uorient, _ulen) = u;
+        let (uid, uorient, ulen) = u;
         let u = Handle::pack(uid, uorient == Direction::Left);
         let (vid, vorient, _vlen) = v;
         let v = Handle::pack(vid, vorient == Direction::Left);
@@ -568,7 +568,7 @@ impl<'a> CollapseEventTracker<'a> {
         // assumes that the original node is split into two parts, where the first part, u, must
         // now be de-collapsed.
         let w = graph.append_handle(&graph.sequence_vec(u)[..]);
-        log::debug!("++ creating duplicate {} of node {}", v2str(&w), v2str(&u),);
+        log::debug!("++ creating duplicate {} of node {}:{}", v2str(&w), v2str(&u), ulen);
         // copy left-incident edges of u onto w
 
         for x in graph.neighbors(u, Direction::Left).collect::<Vec<Handle>>() {
