@@ -326,7 +326,7 @@ impl<'a> CollapseEventTracker<'a> {
         let mut res: Vec<(Node, Node)> = Vec::new();
         // it is important to preserve the order in which the collapses were made, so that's why we
         // are iterating over transform (FxIndexMap).
-        for ((vid, vlen), rule) in self.transform.iter() {
+        for ((vid, vlen), rule) in self.transform.iter().rev() {
             log::debug!(
                 "iterating through rule {}:{} -> {}",
                 vid,
@@ -366,7 +366,6 @@ impl<'a> CollapseEventTracker<'a> {
                 .collect::<Vec<String>>()
                 .join("\n")
         );
-        res.reverse();
         res
     }
 
