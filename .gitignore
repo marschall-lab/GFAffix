@@ -1,6 +1,10 @@
+**/*.bak
+**/*.log
+**/*.save
 **/*.swo
 **/*.swp
+**/.DS_Store
 Cargo.lock
 doc/*.aux
 doc/*.log
-target/**
+target/
