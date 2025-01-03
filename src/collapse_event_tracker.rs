@@ -326,29 +326,31 @@ impl<'a> CollapseEventTracker<'a> {
         let mut res: Vec<(Node, Node)> = Vec::new();
         // it is important to preserve the order in which the collapses were made, so that's why we
         // are iterating over transform (FxIndexMap) in reversed order.
-        for ((vid, vlen), rule) in self.transform.iter().rev() {
-            log::debug!(
-                "iterating through rule {}:{} -> {}",
-                vid,
-                vlen,
-                rule.iter()
-                    .map(|(uid, uo, ulen)| format!(
-                        "{}{}:{}",
-                        match uo {
-                            Direction::Right => ">",
-                            Direction::Left => "<",
-                        },
-                        uid,
-                        ulen
-                    ))
-                    .collect::<Vec<String>>()
-                    .join("")
-            );
-            for (uid, _, ulen) in rule {
-                if let Some(dupl) = homologs.get(&(*uid, *ulen)) {
-                    if *counts.get(dupl).unwrap() > 1 && vid != uid {
-                        res.push(((*uid, *ulen), (*vid, *vlen)));
-                        counts.entry(*dupl).and_modify(|c| *c -= 1);
+        for (&(vid, vlen), rule) in self.transform.iter().rev() {
+            if self.dont_collapse_nodes.contains(&(vid, vlen)) {
+                log::debug!(
+                    "iterating through dont-collapse rule {}:{} -> {}",
+                    vid,
+                    vlen,
+                    rule.iter()
+                        .map(|(uid, uo, ulen)| format!(
+                            "{}{}:{}",
+                            match uo {
+                                Direction::Right => ">",
+                                Direction::Left => "<",
+                            },
+                            uid,
+                            ulen
+                        ))
+                        .collect::<Vec<String>>()
+                        .join("")
+                );
+                for &(uid, _, ulen) in rule {
+                    if let Some(dupl) = homologs.get(&(uid, ulen)) {
+                        if *counts.get(dupl).unwrap() > 1 && vid != uid {
+                            res.push(((uid, ulen), (vid, vlen)));
+                            counts.entry(*dupl).and_modify(|c| *c -= 1);
+                        }
                     }
                 }
             }
@@ -568,7 +570,12 @@ impl<'a> CollapseEventTracker<'a> {
         // assumes that the original node is split into two parts, where the first part, u, must
         // now be de-collapsed.
         let w = graph.append_handle(&graph.sequence_vec(u)[..]);
-        log::debug!("++ creating duplicate {} of node {}:{}", v2str(&w), v2str(&u), ulen);
+        log::debug!(
+            "++ creating duplicate {} of node {}:{}",
+            v2str(&w),
+            v2str(&u),
+            ulen
+        );
         // copy left-incident edges of u onto w
 
         for x in graph.neighbors(u, Direction::Left).collect::<Vec<Handle>>() {

@@ -968,7 +968,10 @@ fn check_transform(
         if let Some(path) = transform.get(v) {
             for &(uid, _, ulen) in path.iter() {
                 if decollapsed.contains(&(uid, ulen)) {
-                    panic!("node {}:{} is collapsed on reference path with original node {}:{}", uid, ulen, v.0, v.1);
+                    panic!(
+                        "node {}:{} is collapsed on reference path with original node {}:{}",
+                        uid, ulen, v.0, v.1
+                    );
                 }
                 decollapsed.insert((uid, ulen));
             }
