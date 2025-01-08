@@ -8,6 +8,7 @@ use std::iter::FromIterator;
 use std::str;
 
 /* crate use */
+use aho_corasick::{AhoCorasick, BuildError};
 use clap::{crate_version, Parser};
 use env_logger::Env;
 use flate2::{read::MultiGzDecoder, write::GzEncoder, Compression};
@@ -23,6 +24,7 @@ use handlegraph::{
     mutablehandlegraph::{AdditiveHandleGraph, MutableHandles},
 };
 use indexmap::{IndexMap, IndexSet};
+use memchr::{memchr, memrchr};
 use rayon::prelude::*;
 use regex::Regex;
 use rustc_hash::{FxBuildHasher, FxHashMap, FxHashSet};
@@ -38,6 +40,8 @@ mod walk_transform;
 use walk_transform::*;
 
 const EXPLORE_NEIGHBORHOOD: usize = 2;
+const PATH_CHUNK_SIZE: usize = 4000;
+
 type FxIndexMap<K, V> = IndexMap<K, V, FxBuildHasher>;
 type FxIndexSet<V> = IndexSet<V, FxBuildHasher>;
 
@@ -1051,59 +1055,137 @@ fn print<W: io::Write>(affix: &AffixSubgraph, out: &mut io::BufWriter<W>) -> Res
     Ok(())
 }
 
-fn parse_and_transform_paths<W: io::Write, T: OptFields>(
-    gfa: &GFA<usize, T>,
-    orig_node_lens: &FxHashMap<usize, usize>,
+fn build_ahocorasick_paths(
     transform: &FxHashMap<Node, Vec<OrientedNode>>,
-    walks: &FxHashMap<Vec<u8>, Vec<u8>>,
+    orig_node_lens: &FxHashMap<usize, usize>,
+) -> Result<(AhoCorasick, Vec<Vec<u8>>), BuildError> {
+    let mut patterns: Vec<Vec<u8>> = Vec::new();
+    let mut replace_with: Vec<Vec<u8>> = Vec::new();
+
+    for ((v, vlen), us) in transform.iter() {
+        if let Some(olen) = orig_node_lens.get(v) {
+            if olen == vlen {
+                patterns.push(format!(",{}+", v).into());
+                patterns.push(format!(",{}-", v).into());
+                replace_with.push(
+                    us.into_iter()
+                        .map(|(u, uo, _)| {
+                            format!(
+                                ",{}{}",
+                                u,
+                                match uo {
+                                    Direction::Left => "-",
+                                    Direction::Right => "+",
+                                }
+                            )
+                        })
+                        .collect::<Vec<String>>()
+                        .join("")
+                        .into(),
+                );
+                replace_with.push(
+                    us.into_iter()
+                        .rev()
+                        .map(|(u, uo, _)| {
+                            format!(
+                                ",{}{}",
+                                u,
+                                match uo {
+                                    Direction::Left => "+",
+                                    Direction::Right => "-",
+                                }
+                            )
+                        })
+                        .collect::<Vec<String>>()
+                        .join("")
+                        .into(),
+                );
+            }
+        }
+    }
+    //    log::debug!("patterns:\n{}", patterns.iter().map(|x| std::str::from_utf8(x).unwrap()).collect::<Vec<&str>>().join(", "));
+    //    log::debug!("replacements:\n{}", replace_with.iter().map(|x| std::str::from_utf8(x).unwrap()).collect::<Vec<&str>>().join(", "));
+    AhoCorasick::new(patterns).map(|x| (x, replace_with))
+}
+
+fn transform_path(
+    path: &[u8],
+    transform: &FxHashMap<Node, Vec<OrientedNode>>,
+    orig_node_lens: &FxHashMap<usize, usize>,
+) -> Vec<u8> {
+    let (ac, replace_with) = build_ahocorasick_paths(transform, orig_node_lens)
+        .expect("unable to build Aho-Corasick automaton for this transformation table");
+
+    let start = memchr(b',', &path).unwrap_or(path.len());
+
+    let mut prefix = vec![b','];
+    prefix.extend_from_slice(&path[..start]);
+    let mut transl_prefix = ac
+        .try_replace_all_bytes(&prefix, &replace_with)
+        .expect("try_replace_all_bytes failed")[1..]
+        .to_vec();
+
+    let mut transl_suffix: Vec<u8> = (start..path.len())
+        .into_par_iter()
+        .step_by(PATH_CHUNK_SIZE)
+        .map(|p| {
+            // adjust start and end positions to capture entire nodes
+            let i = p + match &path[p] {
+                b',' => 0,
+                _ => memchr(
+                    b',',
+                    &path[p..std::cmp::min(path.len(), p + PATH_CHUNK_SIZE)],
+                )
+                .unwrap_or(path.len()),
+            };
+
+            let j = if p + PATH_CHUNK_SIZE < path.len() {
+                p + PATH_CHUNK_SIZE
+                    + match &path[p + PATH_CHUNK_SIZE] {
+                        b',' => 0,
+                        _ => memchr(
+                            b',',
+                            &path[p + PATH_CHUNK_SIZE
+                                ..std::cmp::min(path.len(), p + 2 * PATH_CHUNK_SIZE)],
+                        )
+                        .unwrap_or(0),
+                    }
+            } else {
+                path.len()
+            };
+            ac.try_replace_all_bytes(&path[i..j], &replace_with)
+                .expect("try_replace_all_bytes failed")
+        })
+        .reduce(
+            || Vec::new(),
+            |mut v1, mut v2| {
+                v1.append(&mut v2);
+                v1
+            },
+        );
+
+    transl_prefix.append(&mut transl_suffix);
+    transl_prefix
+}
+
+fn parse_and_transform_paths<W: io::Write, R: io::Read>(
+    data: io::BufReader<R>,
+    transform: &FxHashMap<Node, Vec<OrientedNode>>,
+    orig_node_lens: &FxHashMap<usize, usize>,
     out: &mut io::BufWriter<W>,
 ) -> Result<(), Box<dyn Error>> {
-    let mut out_b: Vec<u8> = Vec::new();
-    for path in gfa.paths.iter() {
-        let l = path.segment_names.len();
-        if out_b.capacity() < l {
-            out_b.reserve(l - out_b.capacity());
+    for line in ByteLineReader::new(data) {
+        if line[0] == b'P' {
+            let start = memchr(b'\t', &line[2..]).expect("invalid P line") + 3;
+            let end = memrchr(b'\t', &line).expect("invalid P line");
+            out.write(&line[..start])?;
+            out.write(&transform_path(
+                &line[start..end],
+                transform,
+                orig_node_lens,
+            ))?;
+            out.write(&line[end..])?;
         }
-        if let Some(walk_name_u8) = walks.get(&path.path_name[..]) {
-            log::debug!(
-                "transforming walk {}",
-                str::from_utf8(&path.path_name[..path.path_name.len() - 8])?
-            );
-            write!(out, "W\t{}\t", str::from_utf8(walk_name_u8)?)?;
-            for (sid, o) in path.iter() {
-                for (vid, d) in
-                    transform_node(sid, o, *orig_node_lens.get(&sid).unwrap(), transform)
-                {
-                    out_b.push(if d == Direction::Right { b'>' } else { b'<' });
-                    out_b.extend_from_slice(vid.to_string().as_bytes());
-                }
-            }
-            out.write_all(&out_b[..])?;
-            writeln!(out)?;
-        } else {
-            let path_name = str::from_utf8(&path.path_name)?;
-            log::debug!("transforming path {}", path_name);
-            for (sid, o) in path.iter() {
-                for (vid, d) in transform_node(
-                    sid,
-                    o,
-                    *orig_node_lens.get(&sid).unwrap_or_else(|| {
-                        panic!("cannot obtain size of undeclared node {}", &sid)
-                    }),
-                    transform,
-                ) {
-                    out_b.extend_from_slice(vid.to_string().as_bytes());
-                    out_b.push(if d == Direction::Right { b'+' } else { b'-' });
-                    out_b.push(b',');
-                }
-            }
-            // remove last ","
-            out_b.pop();
-            write!(out, "P\t{}\t", path_name)?;
-            out.write_all(&out_b[..])?;
-            writeln!(out, "\t*")?;
-        }
-        out_b.clear();
     }
 
     Ok(())
@@ -1136,6 +1218,26 @@ fn parse_gfa_v12<R: io::Read>(
     let gfa: GFA<usize, ()> = parser.parse_lines(lines.iter().map(|x| &x[..])).unwrap();
 
     (gfa, walks)
+}
+
+fn parse_gfa_omit_paths<R: io::Read>(data: io::BufReader<R>) -> GFA<usize, ()> {
+    let mut gfa: GFA<usize, ()> = GFA::new();
+
+    let parser = GFAParser::new();
+
+    for line in ByteLineReader::new(data) {
+        match line[0] {
+            b'H' | b'S' | b'L' => {
+                gfa.insert_line(
+                    parser
+                        .parse_gfa_line(&line)
+                        .expect("unable to parse line in GFA file"),
+                );
+            }
+            _ => (),
+        };
+    }
+    gfa
 }
 
 fn main() -> Result<(), io::Error> {
@@ -1180,7 +1282,8 @@ fn main() -> Result<(), io::Error> {
         Box::new(f)
     };
 
-    let (mut gfa, walks) = parse_gfa_v12(io::BufReader::new(reader));
+    // let (mut gfa, walks) = parse_gfa_v12(io::BufReader::new(reader));
+    let mut gfa = parse_gfa_omit_paths(io::BufReader::new(reader));
 
     //
     // REMOVING PATHS FROM GRAPH -- they SUBSTANTIALLY slow down graph editing
@@ -1342,11 +1445,22 @@ fn main() -> Result<(), io::Error> {
         );
     }
 
+    log::info!("transforming path+walk lines");
+    let f = std::fs::File::open(params.graph.clone()).expect("Error opening file");
+    let reader: Box<dyn Read> = if params.graph.ends_with(".gz") {
+        Box::new(MultiGzDecoder::new(f))
+    } else {
+        Box::new(f)
+    };
+
     // swap paths back in to produce final output
     std::mem::swap(&mut gfa.paths, &mut paths);
-    log::info!("transforming paths+walks");
-    if let Err(e) = parse_and_transform_paths(&gfa, &node_lens, &transform, &walks, &mut graph_out)
-    {
+    if let Err(e) = parse_and_transform_paths(
+        io::BufReader::new(reader),
+        &transform,
+        &node_lens,
+        &mut graph_out,
+    ) {
         panic!(
             "unable to write refined GFA path+walk lines to {}: {}",
             params.refined_graph_out, e
