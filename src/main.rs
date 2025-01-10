@@ -1136,7 +1136,7 @@ fn transform_path(
                     b',',
                     &path[p..std::cmp::min(path.len(), p + PATH_CHUNK_SIZE)],
                 )
-                .unwrap_or(path.len()),
+                .unwrap_or(path.len()-p),
             };
 
             let j = if p + PATH_CHUNK_SIZE < path.len() {
