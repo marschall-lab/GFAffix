@@ -12,11 +12,7 @@ use aho_corasick::{AhoCorasick, BuildError};
 use clap::{crate_version, Parser};
 use env_logger::Env;
 use flate2::{read::MultiGzDecoder, write::GzEncoder, Compression};
-use gfa::{
-    gfa::{orientation::Orientation, GFA},
-    optfields::OptFields,
-    parser::GFAParser,
-};
+use gfa::{gfa::GFA, parser::GFAParser};
 use handlegraph::{
     handle::{Direction, Edge, Handle},
     handlegraph::*,
@@ -24,7 +20,7 @@ use handlegraph::{
     mutablehandlegraph::{AdditiveHandleGraph, MutableHandles},
 };
 use indexmap::{IndexMap, IndexSet};
-use memchr::{memchr, memrchr};
+use memchr::{memchr, memchr2, memrchr};
 use rayon::prelude::*;
 use regex::Regex;
 use rustc_hash::{FxBuildHasher, FxHashMap, FxHashSet};
@@ -782,40 +778,6 @@ fn find_and_collapse_walk_preserving_shared_affixes<'a>(
     (affixes, del_subg, event_tracker)
 }
 
-fn transform_node(
-    vid: usize,
-    orient: Orientation,
-    v_len: usize,
-    transform: &FxHashMap<Node, Vec<OrientedNode>>,
-) -> Vec<(usize, Direction)> {
-    match transform.get(&(vid, v_len)) {
-        Some(us) => match orient {
-            Orientation::Forward => us.iter().map(|(x, y, _)| (*x, *y)).collect(),
-            Orientation::Backward => us
-                .iter()
-                .rev()
-                .map(|(x, y, _)| {
-                    (
-                        *x,
-                        if *y == Direction::Left {
-                            Direction::Right
-                        } else {
-                            Direction::Left
-                        },
-                    )
-                })
-                .collect(),
-        },
-        None => vec![(
-            vid,
-            match orient {
-                Orientation::Forward => Direction::Right,
-                Orientation::Backward => Direction::Left,
-            },
-        )],
-    }
-}
-
 fn print_active_subgraph<W: io::Write>(
     graph: &HashGraph,
     del_subg: &DeletedSubGraph,
@@ -1059,15 +1021,13 @@ fn build_ahocorasick_paths(
     transform: &FxHashMap<Node, Vec<OrientedNode>>,
     orig_node_lens: &FxHashMap<usize, usize>,
 ) -> Result<(AhoCorasick, Vec<Vec<u8>>), BuildError> {
-    let mut patterns: Vec<Vec<u8>> = Vec::new();
-    let mut replace_with: Vec<Vec<u8>> = Vec::new();
+    let mut patterns_replacements: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
 
     for ((v, vlen), us) in transform.iter() {
         if let Some(olen) = orig_node_lens.get(v) {
             if olen == vlen {
-                patterns.push(format!(",{}+", v).into());
-                patterns.push(format!(",{}-", v).into());
-                replace_with.push(
+                let p = format!(",{}+", v).into();
+                let r = 
                     us.into_iter()
                         .map(|(u, uo, _)| {
                             format!(
@@ -1081,10 +1041,13 @@ fn build_ahocorasick_paths(
                         })
                         .collect::<Vec<String>>()
                         .join("")
-                        .into(),
-                );
-                replace_with.push(
-                    us.into_iter()
+                        .into();
+                if p != r {
+                    patterns_replacements.push((p, r));
+                }
+
+                let p = format!(",{}-", v).into();
+                let r = us.into_iter()
                         .rev()
                         .map(|(u, uo, _)| {
                             format!(
@@ -1098,13 +1061,70 @@ fn build_ahocorasick_paths(
                         })
                         .collect::<Vec<String>>()
                         .join("")
-                        .into(),
-                );
+                        .into();
+                if p != r {
+                    patterns_replacements.push((p, r));
+                }
             }
         }
     }
-    //    log::debug!("patterns:\n{}", patterns.iter().map(|x| std::str::from_utf8(x).unwrap()).collect::<Vec<&str>>().join(", "));
-    //    log::debug!("replacements:\n{}", replace_with.iter().map(|x| std::str::from_utf8(x).unwrap()).collect::<Vec<&str>>().join(", "));
+    let (patterns, replace_with): (Vec<Vec<u8>>, Vec<Vec<u8>>) = patterns_replacements.into_iter().unzip();
+    AhoCorasick::new(patterns).map(|x| (x, replace_with))
+}
+
+fn build_ahocorasick_walks(
+    transform: &FxHashMap<Node, Vec<OrientedNode>>,
+    graph: &HashGraph,
+    orig_node_lens: &FxHashMap<usize, usize>,
+) -> Result<(AhoCorasick, Vec<Vec<u8>>), BuildError> {
+    let mut patterns_replacements: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
+
+    for ((v, vlen), us) in transform.iter() {
+        if let Some(olen) = orig_node_lens.get(v) {
+            if olen == vlen {
+                let p = format!(",{}+", v).into();
+                let r = 
+                    us.into_iter()
+                        .map(|(u, uo, _)| {
+                            format!(
+                                ",{}{}",
+                                u,
+                                match uo {
+                                    Direction::Left => "-",
+                                    Direction::Right => "+",
+                                }
+                            )
+                        })
+                        .collect::<Vec<String>>()
+                        .join("")
+                        .into();
+                if p != r {
+                    patterns_replacements.push((p, r));
+                }
+
+                let p = format!(",{}-", v).into();
+                let r = us.into_iter()
+                        .rev()
+                        .map(|(u, uo, _)| {
+                            format!(
+                                ",{}{}",
+                                u,
+                                match uo {
+                                    Direction::Left => "+",
+                                    Direction::Right => "-",
+                                }
+                            )
+                        })
+                        .collect::<Vec<String>>()
+                        .join("")
+                        .into();
+                if p != r {
+                    patterns_replacements.push((p, r));
+                }
+            }
+        }
+    }
+    let (patterns, replace_with): (Vec<Vec<u8>>, Vec<Vec<u8>>) = patterns_replacements.into_iter().unzip();
     AhoCorasick::new(patterns).map(|x| (x, replace_with))
 }
 
@@ -1136,7 +1156,7 @@ fn transform_path(
                     b',',
                     &path[p..std::cmp::min(path.len(), p + PATH_CHUNK_SIZE)],
                 )
-                .unwrap_or(path.len()-p),
+                .unwrap_or(path.len() - p),
             };
 
             let j = if p + PATH_CHUNK_SIZE < path.len() {
@@ -1191,53 +1211,130 @@ fn parse_and_transform_paths<W: io::Write, R: io::Read>(
     Ok(())
 }
 
-fn parse_header<R: io::Read>(mut data: io::BufReader<R>) -> Result<Vec<u8>, io::Error> {
-    let mut buf = vec![];
-    while data.read_until(b'\n', &mut buf)? > 0 {
-        if buf[0] == b'H' {
-            // remove trailing new line character
-            if buf.last() == Some(&b'\n') {
-                buf.pop();
-            }
-            break;
-        }
-        buf.clear();
-    }
-    Ok(buf)
-}
-
-fn parse_gfa_v12<R: io::Read>(
+fn parse_gfa_omit_paths<R: io::Read>(
     data: io::BufReader<R>,
-) -> (GFA<usize, ()>, FxHashMap<Vec<u8>, Vec<u8>>) {
-    let parser = GFAParser::new();
-
-    let mut walks = FxHashMap::default();
-    let lines: Vec<Vec<u8>> = ByteLineReader::new(data)
-        .map(|x| transform_walks(x, &mut walks))
-        .collect();
-    let gfa: GFA<usize, ()> = parser.parse_lines(lines.iter().map(|x| &x[..])).unwrap();
-
-    (gfa, walks)
-}
-
-fn parse_gfa_omit_paths<R: io::Read>(data: io::BufReader<R>) -> GFA<usize, ()> {
+    no_collapse_path_regexp: &str,
+) -> (GFA<usize, ()>, Option<Vec<u8>>, Vec<usize>) {
     let mut gfa: GFA<usize, ()> = GFA::new();
+    let mut header = None;
+    let mut dont_collapse_nodes = Vec::new();
+    let mut c = 0;
+    let re = if no_collapse_path_regexp.is_empty() {
+        None
+    } else {
+        Some(Regex::new(no_collapse_path_regexp).unwrap())
+    };
 
     let parser = GFAParser::new();
 
-    for line in ByteLineReader::new(data) {
+    for mut line in ByteLineReader::new(data) {
         match line[0] {
-            b'H' | b'S' | b'L' => {
+            b'H' => {
+                // remove trailing new line character
+                if line.last() == Some(&b'\n') {
+                    line.pop();
+                }
+                log::debug!(
+                    "found header line: {}",
+                    str::from_utf8(&line).expect("unable to parse header line")
+                );
+                header = Some(line);
+            }
+            b'S' | b'L' => {
                 gfa.insert_line(
                     parser
                         .parse_gfa_line(&line)
                         .expect("unable to parse line in GFA file"),
                 );
             }
+            b'P' => {
+                let i =
+                    2 + memchr(b'\t', &line[2..]).expect("unable to read path name from P line");
+                let path_name = str::from_utf8(&line[2..i]).unwrap();
+                if re.is_some() && re.as_ref().unwrap().is_match(path_name) {
+                    log::debug!("flagging nodes of path {} as non-collapsing", path_name,);
+                    let j = memrchr(b'\t', &line).unwrap(); // this works, because we already know
+                                                            // that the line contains at least one
+                                                            // tab
+                    let mut p = i + 1;
+                    while p < j {
+                        let x = p + memchr(b',', &line[p..j]).unwrap_or(j - p);
+                        let node_id = str::from_utf8(&line[p..x - 1]).unwrap();
+                        dont_collapse_nodes.push(
+                            node_id
+                                .parse()
+                                .expect(&format!("node id {} is not integer", &node_id)),
+                        );
+                        p = x + 1;
+                    }
+                    c += 1;
+                }
+            }
+            b'W' => {
+                let i = 2 + memchr(b'\t', &line[2..])
+                    .expect("unable to read sample identifier from W line");
+                let sample_name = str::from_utf8(&line[2..i]).unwrap();
+                let j = i
+                    + 1
+                    + memchr(b'\t', &line[i + 1..])
+                        .expect("unable to read haplotype identifier from W line");
+                let haplotype_name = str::from_utf8(&line[i + 1..j]).unwrap();
+                let i = j
+                    + 1
+                    + memchr(b'\t', &line[j + 1..])
+                        .expect("unable to read sequence identifier from W line");
+                let sequence_name = str::from_utf8(&line[j + 1..i]).unwrap();
+                let j = i
+                    + 1
+                    + memchr(b'\t', &line[i + 1..])
+                        .expect("unable to read sequence start position from W line");
+                let seq_start = str::from_utf8(&line[i + 1..j]).unwrap();
+                let i = j
+                    + 1
+                    + memchr(b'\t', &line[j + 1..])
+                        .expect("unable to read sequence end position from W line");
+                let seq_end = str::from_utf8(&line[j + 1..i]).unwrap();
+
+                let mut walk_name = format!("{}#{}#{}", sample_name, haplotype_name, sequence_name);
+                if !seq_start.is_empty() && !seq_end.is_empty() {
+                    walk_name.push_str(&format!(":{}-{}", seq_start, seq_end));
+                }
+                if re.is_some() && re.as_ref().unwrap().is_match(&walk_name) {
+                    log::debug!("flagging nodes of walk {} as non-collapsing", walk_name,);
+                    let mut p = i + 1;
+                    let end = line.len()
+                        - match line[line.len() - 1] {
+                            b'\n' => 1,
+                            _ => 0,
+                        };
+
+                    while p < end {
+                        let x =
+                            p + 1 + memchr2(b'>', b'<', &line[p + 1..end]).unwrap_or(end - p - 1);
+                        let node_id = str::from_utf8(&line[p + 1..x]).unwrap();
+                        dont_collapse_nodes.push(
+                            node_id
+                                .parse()
+                                .expect(&format!("node id {} is not integer", &node_id)),
+                        );
+                        p = x;
+                    }
+                    c += 1;
+                }
+            }
             _ => (),
         };
     }
-    gfa
+
+    if !no_collapse_path_regexp.is_empty() {
+        log::info!(
+            "found {} no-collapse-paths with a total number of {} nodes matching regular rexpression \"{}\"",
+            c,
+            dont_collapse_nodes.len(),
+            no_collapse_path_regexp
+        );
+    }
+    (gfa, header, dont_collapse_nodes)
 }
 
 fn main() -> Result<(), io::Error> {
@@ -1282,15 +1379,8 @@ fn main() -> Result<(), io::Error> {
         Box::new(f)
     };
 
-    // let (mut gfa, walks) = parse_gfa_v12(io::BufReader::new(reader));
-    let mut gfa = parse_gfa_omit_paths(io::BufReader::new(reader));
-
-    //
-    // REMOVING PATHS FROM GRAPH -- they SUBSTANTIALLY slow down graph editing
-    //
-    //
-    let mut paths = Vec::new();
-    std::mem::swap(&mut gfa.paths, &mut paths);
+    let (gfa, header, dont_collapse_nodes) =
+        parse_gfa_omit_paths(io::BufReader::new(reader), &params.no_collapse_path);
 
     log::info!("constructing handle graph");
     let mut graph = HashGraph::from_gfa(&gfa);
@@ -1308,37 +1398,11 @@ fn main() -> Result<(), io::Error> {
         node_lens.insert(v.unpack_number() as usize, graph.node_len(v));
     }
 
-    let mut dont_collapse_nodes: FxIndexSet<Node> = FxIndexSet::default();
-    if !params.no_collapse_path.is_empty() {
-        let mut c = 0;
-        log::debug!(
-            "searching for paths matching regular expression \"{}\"..",
-            params.no_collapse_path
-        );
-        let re = Regex::new(&params.no_collapse_path).unwrap();
-        for path in paths.iter() {
-            let path_name = str::from_utf8(&path.path_name[..]).unwrap();
-            if re.is_match(path_name) {
-                dont_collapse_nodes.extend(
-                    path.iter()
-                        .map(|(xid, _)| (xid, *node_lens.get(&xid).unwrap())),
-                );
-
-                log::debug!(
-                    "flagging nodes of path {} as non-collapsing, total number is now at {}",
-                    path_name,
-                    dont_collapse_nodes.len()
-                );
-                c += 1;
-            }
-        }
-        log::info!(
-            "found {} no-collapse-paths with a total number of {} nodes matching regular rexpression \"{}\"",
-            c,
-            dont_collapse_nodes.len(),
-            params.no_collapse_path
-        );
-    }
+    let mut dont_collapse_nodes: FxIndexSet<Node> = FxIndexSet::from_iter(
+        dont_collapse_nodes
+            .into_iter()
+            .map(|x| (x, *node_lens.get(&x).expect(&format!("unknown node {}", x)))),
+    );
     log::debug!("last original node is >{}", graph.max_node_id());
     log::info!("identifying walk-preserving shared affixes");
     let (affixes, mut del_subg, mut event_tracker) =
@@ -1422,20 +1486,13 @@ fn main() -> Result<(), io::Error> {
         )?))
     };
 
-    let f = std::fs::File::open(params.graph.clone()).expect("Error opening file");
-    let reader: Box<dyn Read> = if params.graph.ends_with(".gz") {
-        Box::new(MultiGzDecoder::new(f))
-    } else {
-        Box::new(f)
-    };
-    let header = parse_header(io::BufReader::new(reader))?;
     writeln!(
         graph_out,
         "{}",
-        if header.is_empty() {
-            "H\tVN:Z:1.1"
+        if let Some(h) = header.as_ref() {
+            str::from_utf8(h).unwrap()
         } else {
-            str::from_utf8(&header[..]).unwrap()
+            "H\tVN:Z:1.1"
         }
     )?;
     if let Err(e) = print_active_subgraph(&graph, &del_subg, &mut graph_out) {
@@ -1453,8 +1510,6 @@ fn main() -> Result<(), io::Error> {
         Box::new(f)
     };
 
-    // swap paths back in to produce final output
-    std::mem::swap(&mut gfa.paths, &mut paths);
     if let Err(e) = parse_and_transform_paths(
         io::BufReader::new(reader),
         &transform,
