@@ -20,7 +20,7 @@ use handlegraph::{
     mutablehandlegraph::{AdditiveHandleGraph, MutableHandles},
 };
 use indexmap::{IndexMap, IndexSet};
-use memchr::{memchr, memchr2, memrchr};
+use memchr::{memchr, memrchr};
 use rayon::prelude::*;
 use regex::Regex;
 use rustc_hash::{FxBuildHasher, FxHashMap, FxHashSet};
@@ -36,7 +36,6 @@ mod walk_transform;
 use walk_transform::*;
 
 const EXPLORE_NEIGHBORHOOD: usize = 2;
-const PATH_CHUNK_SIZE: usize = 4000;
 
 type FxIndexMap<K, V> = IndexMap<K, V, FxBuildHasher>;
 type FxIndexSet<V> = IndexSet<V, FxBuildHasher>;
@@ -1026,12 +1025,14 @@ fn build_ahocorasick_paths(
     for ((v, vlen), us) in transform.iter() {
         if let Some(olen) = orig_node_lens.get(v) {
             if olen == vlen {
-                let p = format!(",{}+", v).into();
+
+                // forward pattern
+                let p = format!("{}+", v);
                 let r = 
                     us.into_iter()
                         .map(|(u, uo, _)| {
                             format!(
-                                ",{}{}",
+                                "{}{}",
                                 u,
                                 match uo {
                                     Direction::Left => "-",
@@ -1040,18 +1041,21 @@ fn build_ahocorasick_paths(
                             )
                         })
                         .collect::<Vec<String>>()
-                        .join("")
-                        .into();
+                        .join(",");
                 if p != r {
-                    patterns_replacements.push((p, r));
+                    // case 1: node is at the beginning of a path
+                    patterns_replacements.push((format!("\t{}", p).into(), format!("\t{}", r).into()));
+                    // case 2: anywhere else
+                    patterns_replacements.push((format!(",{}", p).into(), format!(",{}", r).into()));
                 }
 
-                let p = format!(",{}-", v).into();
+                // reverse pattern
+                let p = format!("{}-", v);
                 let r = us.into_iter()
                         .rev()
                         .map(|(u, uo, _)| {
                             format!(
-                                ",{}{}",
+                                "{}{}",
                                 u,
                                 match uo {
                                     Direction::Left => "+",
@@ -1060,155 +1064,29 @@ fn build_ahocorasick_paths(
                             )
                         })
                         .collect::<Vec<String>>()
-                        .join("")
-                        .into();
+                        .join(",");
                 if p != r {
-                    patterns_replacements.push((p, r));
+                    // case 1: node is at the beginning of a path
+                    patterns_replacements.push((format!("\t{}", p).into(), format!("\t{}", r).into()));
+                    // case 2: anywhere else
+                    patterns_replacements.push((format!(",{}", p).into(), format!(",{}", r).into()));
                 }
             }
         }
     }
     let (patterns, replace_with): (Vec<Vec<u8>>, Vec<Vec<u8>>) = patterns_replacements.into_iter().unzip();
     AhoCorasick::new(patterns).map(|x| (x, replace_with))
-}
-
-fn build_ahocorasick_walks(
-    transform: &FxHashMap<Node, Vec<OrientedNode>>,
-    graph: &HashGraph,
-    orig_node_lens: &FxHashMap<usize, usize>,
-) -> Result<(AhoCorasick, Vec<Vec<u8>>), BuildError> {
-    let mut patterns_replacements: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
-
-    for ((v, vlen), us) in transform.iter() {
-        if let Some(olen) = orig_node_lens.get(v) {
-            if olen == vlen {
-                let p = format!(",{}+", v).into();
-                let r = 
-                    us.into_iter()
-                        .map(|(u, uo, _)| {
-                            format!(
-                                ",{}{}",
-                                u,
-                                match uo {
-                                    Direction::Left => "-",
-                                    Direction::Right => "+",
-                                }
-                            )
-                        })
-                        .collect::<Vec<String>>()
-                        .join("")
-                        .into();
-                if p != r {
-                    patterns_replacements.push((p, r));
-                }
-
-                let p = format!(",{}-", v).into();
-                let r = us.into_iter()
-                        .rev()
-                        .map(|(u, uo, _)| {
-                            format!(
-                                ",{}{}",
-                                u,
-                                match uo {
-                                    Direction::Left => "+",
-                                    Direction::Right => "-",
-                                }
-                            )
-                        })
-                        .collect::<Vec<String>>()
-                        .join("")
-                        .into();
-                if p != r {
-                    patterns_replacements.push((p, r));
-                }
-            }
-        }
-    }
-    let (patterns, replace_with): (Vec<Vec<u8>>, Vec<Vec<u8>>) = patterns_replacements.into_iter().unzip();
-    AhoCorasick::new(patterns).map(|x| (x, replace_with))
-}
-
-fn transform_path(
-    path: &[u8],
-    transform: &FxHashMap<Node, Vec<OrientedNode>>,
-    orig_node_lens: &FxHashMap<usize, usize>,
-) -> Vec<u8> {
-    let (ac, replace_with) = build_ahocorasick_paths(transform, orig_node_lens)
-        .expect("unable to build Aho-Corasick automaton for this transformation table");
-
-    let start = memchr(b',', &path).unwrap_or(path.len());
-
-    let mut prefix = vec![b','];
-    prefix.extend_from_slice(&path[..start]);
-    let mut transl_prefix = ac
-        .try_replace_all_bytes(&prefix, &replace_with)
-        .expect("try_replace_all_bytes failed")[1..]
-        .to_vec();
-
-    let mut transl_suffix: Vec<u8> = (start..path.len())
-        .into_par_iter()
-        .step_by(PATH_CHUNK_SIZE)
-        .map(|p| {
-            // adjust start and end positions to capture entire nodes
-            let i = p + match &path[p] {
-                b',' => 0,
-                _ => memchr(
-                    b',',
-                    &path[p..std::cmp::min(path.len(), p + PATH_CHUNK_SIZE)],
-                )
-                .unwrap_or(path.len() - p),
-            };
-
-            let j = if p + PATH_CHUNK_SIZE < path.len() {
-                p + PATH_CHUNK_SIZE
-                    + match &path[p + PATH_CHUNK_SIZE] {
-                        b',' => 0,
-                        _ => memchr(
-                            b',',
-                            &path[p + PATH_CHUNK_SIZE
-                                ..std::cmp::min(path.len(), p + 2 * PATH_CHUNK_SIZE)],
-                        )
-                        .unwrap_or(0),
-                    }
-            } else {
-                path.len()
-            };
-            ac.try_replace_all_bytes(&path[i..j], &replace_with)
-                .expect("try_replace_all_bytes failed")
-        })
-        .reduce(
-            || Vec::new(),
-            |mut v1, mut v2| {
-                v1.append(&mut v2);
-                v1
-            },
-        );
-
-    transl_prefix.append(&mut transl_suffix);
-    transl_prefix
 }
 
 fn parse_and_transform_paths<W: io::Write, R: io::Read>(
-    data: io::BufReader<R>,
+    data: R,
     transform: &FxHashMap<Node, Vec<OrientedNode>>,
     orig_node_lens: &FxHashMap<usize, usize>,
     out: &mut io::BufWriter<W>,
-) -> Result<(), Box<dyn Error>> {
-    for line in ByteLineReader::new(data) {
-        if line[0] == b'P' {
-            let start = memchr(b'\t', &line[2..]).expect("invalid P line") + 3;
-            let end = memrchr(b'\t', &line).expect("invalid P line");
-            out.write(&line[..start])?;
-            out.write(&transform_path(
-                &line[start..end],
-                transform,
-                orig_node_lens,
-            ))?;
-            out.write(&line[end..])?;
-        }
-    }
-
-    Ok(())
+) -> Result<(), io::Error> {
+    let (ac, replace_with) = build_ahocorasick_paths(transform, orig_node_lens)
+        .expect("unable to build Aho-Corasick automaton for this transformation table");
+    ac.try_stream_replace_all(data, out, &replace_with)
 }
 
 fn parse_gfa_omit_paths<R: io::Read>(
@@ -1271,56 +1149,57 @@ fn parse_gfa_omit_paths<R: io::Read>(
                 }
             }
             b'W' => {
-                let i = 2 + memchr(b'\t', &line[2..])
-                    .expect("unable to read sample identifier from W line");
-                let sample_name = str::from_utf8(&line[2..i]).unwrap();
-                let j = i
-                    + 1
-                    + memchr(b'\t', &line[i + 1..])
-                        .expect("unable to read haplotype identifier from W line");
-                let haplotype_name = str::from_utf8(&line[i + 1..j]).unwrap();
-                let i = j
-                    + 1
-                    + memchr(b'\t', &line[j + 1..])
-                        .expect("unable to read sequence identifier from W line");
-                let sequence_name = str::from_utf8(&line[j + 1..i]).unwrap();
-                let j = i
-                    + 1
-                    + memchr(b'\t', &line[i + 1..])
-                        .expect("unable to read sequence start position from W line");
-                let seq_start = str::from_utf8(&line[i + 1..j]).unwrap();
-                let i = j
-                    + 1
-                    + memchr(b'\t', &line[j + 1..])
-                        .expect("unable to read sequence end position from W line");
-                let seq_end = str::from_utf8(&line[j + 1..i]).unwrap();
-
-                let mut walk_name = format!("{}#{}#{}", sample_name, haplotype_name, sequence_name);
-                if !seq_start.is_empty() && !seq_end.is_empty() {
-                    walk_name.push_str(&format!(":{}-{}", seq_start, seq_end));
-                }
-                if re.is_some() && re.as_ref().unwrap().is_match(&walk_name) {
-                    log::debug!("flagging nodes of walk {} as non-collapsing", walk_name,);
-                    let mut p = i + 1;
-                    let end = line.len()
-                        - match line[line.len() - 1] {
-                            b'\n' => 1,
-                            _ => 0,
-                        };
-
-                    while p < end {
-                        let x =
-                            p + 1 + memchr2(b'>', b'<', &line[p + 1..end]).unwrap_or(end - p - 1);
-                        let node_id = str::from_utf8(&line[p + 1..x]).unwrap();
-                        dont_collapse_nodes.push(
-                            node_id
-                                .parse()
-                                .expect(&format!("node id {} is not integer", &node_id)),
-                        );
-                        p = x;
-                    }
-                    c += 1;
-                }
+                panic!("not supported in prerelease");
+//                let i = 2 + memchr(b'\t', &line[2..])
+//                    .expect("unable to read sample identifier from W line");
+//                let sample_name = str::from_utf8(&line[2..i]).unwrap();
+//                let j = i
+//                    + 1
+//                    + memchr(b'\t', &line[i + 1..])
+//                        .expect("unable to read haplotype identifier from W line");
+//                let haplotype_name = str::from_utf8(&line[i + 1..j]).unwrap();
+//                let i = j
+//                    + 1
+//                    + memchr(b'\t', &line[j + 1..])
+//                        .expect("unable to read sequence identifier from W line");
+//                let sequence_name = str::from_utf8(&line[j + 1..i]).unwrap();
+//                let j = i
+//                    + 1
+//                    + memchr(b'\t', &line[i + 1..])
+//                        .expect("unable to read sequence start position from W line");
+//                let seq_start = str::from_utf8(&line[i + 1..j]).unwrap();
+//                let i = j
+//                    + 1
+//                    + memchr(b'\t', &line[j + 1..])
+//                        .expect("unable to read sequence end position from W line");
+//                let seq_end = str::from_utf8(&line[j + 1..i]).unwrap();
+//
+//                let mut walk_name = format!("{}#{}#{}", sample_name, haplotype_name, sequence_name);
+//                if !seq_start.is_empty() && !seq_end.is_empty() {
+//                    walk_name.push_str(&format!(":{}-{}", seq_start, seq_end));
+//                }
+//                if re.is_some() && re.as_ref().unwrap().is_match(&walk_name) {
+//                    log::debug!("flagging nodes of walk {} as non-collapsing", walk_name,);
+//                    let mut p = i + 1;
+//                    let end = line.len()
+//                        - match line[line.len() - 1] {
+//                            b'\n' => 1,
+//                            _ => 0,
+//                        };
+//
+//                    while p < end {
+//                        let x =
+//                            p + 1 + memchr2(b'>', b'<', &line[p + 1..end]).unwrap_or(end - p - 1);
+//                        let node_id = str::from_utf8(&line[p + 1..x]).unwrap();
+//                        dont_collapse_nodes.push(
+//                            node_id
+//                                .parse()
+//                                .expect(&format!("node id {} is not integer", &node_id)),
+//                        );
+//                        p = x;
+//                    }
+//                    c += 1;
+//                }
             }
             _ => (),
         };
@@ -1511,7 +1390,7 @@ fn main() -> Result<(), io::Error> {
     };
 
     if let Err(e) = parse_and_transform_paths(
-        io::BufReader::new(reader),
+        reader,
         &transform,
         &node_lens,
         &mut graph_out,
