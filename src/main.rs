@@ -1087,22 +1087,19 @@ fn build_ahocorasick_paths(
 
 fn transform_path<W: io::Write>(
     path: &[u8],
-    transform: &FxHashMap<Node, Vec<OrientedNode>>,
-    orig_node_lens: &FxHashMap<usize, usize>,
+    ac: &AhoCorasick,
+    replace: &[Vec<u8>],
     out: &mut io::BufWriter<W>
 ) -> Result<(), io::Error>{
-    let (ac, replace_with) = build_ahocorasick_paths(transform, orig_node_lens)
-        .expect("unable to build Aho-Corasick automaton for this transformation table");
-
     let start = memchr(b',', &path).unwrap_or(path.len());
 
     let mut prefix = vec![b','];
     prefix.extend_from_slice(&path[..start]);
     out.write(&ac
-        .try_replace_all_bytes(&prefix, &replace_with)
+        .try_replace_all_bytes(&prefix, &replace)
         .expect("try_replace_all_bytes failed")[1..]
         .to_vec())?;
-    ac.try_stream_replace_all(&path[start..], out, &replace_with)
+    ac.try_stream_replace_all(&path[start..], out, &replace)
             .expect("try_replace_all_bytes failed");
     Ok(())
 }
@@ -1113,6 +1110,10 @@ fn parse_and_transform_paths<W: io::Write, R: io::Read>(
     orig_node_lens: &FxHashMap<usize, usize>,
     out: &mut io::BufWriter<W>,
 ) -> Result<(), Box<dyn Error>> {
+
+    let (ac, replace_with) = build_ahocorasick_paths(transform, orig_node_lens)
+        .expect("unable to build Aho-Corasick automaton for this transformation table");
+
     for line in ByteLineReader::new(data) {
         if line[0] == b'P' {
             let start = memchr(b'\t', &line[2..]).expect("invalid P line") + 3;
@@ -1120,8 +1121,8 @@ fn parse_and_transform_paths<W: io::Write, R: io::Read>(
             out.write(&line[..start])?;
             transform_path(
                 &line[start..end],
-                transform,
-                orig_node_lens,
+                &ac,
+                &replace_with,
                 out,
             )?;
             out.write(&line[end..])?;
