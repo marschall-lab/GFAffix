@@ -20,7 +20,7 @@ use handlegraph::{
     mutablehandlegraph::{AdditiveHandleGraph, MutableHandles},
 };
 use indexmap::{IndexMap, IndexSet};
-use memchr::{memchr, memrchr};
+use memchr::{memchr, memchr2, memrchr};
 use rayon::prelude::*;
 use regex::Regex;
 use rustc_hash::{FxBuildHasher, FxHashMap, FxHashSet};
@@ -1025,14 +1025,12 @@ fn build_ahocorasick_paths(
     for ((v, vlen), us) in transform.iter() {
         if let Some(olen) = orig_node_lens.get(v) {
             if olen == vlen {
-
-                // forward pattern
-                let p = format!("{}+", v);
+                let p = format!(",{}+", v).into();
                 let r = 
                     us.into_iter()
                         .map(|(u, uo, _)| {
                             format!(
-                                "{}{}",
+                                ",{}{}",
                                 u,
                                 match uo {
                                     Direction::Left => "-",
@@ -1041,21 +1039,19 @@ fn build_ahocorasick_paths(
                             )
                         })
                         .collect::<Vec<String>>()
-                        .join(",");
+                        .join("")
+                        .into();
                 if p != r {
-                    // case 1: node is at the beginning of a path
-                    patterns_replacements.push((format!("\t{}", p).into(), format!("\t{}", r).into()));
-                    // case 2: anywhere else
-                    patterns_replacements.push((format!(",{}", p).into(), format!(",{}", r).into()));
+                    patterns_replacements.push((p, r));
                 }
 
                 // reverse pattern
-                let p = format!("{}-", v);
+                let p = format!(",{}-", v).into();
                 let r = us.into_iter()
                         .rev()
                         .map(|(u, uo, _)| {
                             format!(
-                                "{}{}",
+                                ",{}{}",
                                 u,
                                 match uo {
                                     Direction::Left => "+",
@@ -1064,12 +1060,10 @@ fn build_ahocorasick_paths(
                             )
                         })
                         .collect::<Vec<String>>()
-                        .join(",");
+                        .join("")
+                        .into();
                 if p != r {
-                    // case 1: node is at the beginning of a path
-                    patterns_replacements.push((format!("\t{}", p).into(), format!("\t{}", r).into()));
-                    // case 2: anywhere else
-                    patterns_replacements.push((format!(",{}", p).into(), format!(",{}", r).into()));
+                    patterns_replacements.push((p, r));
                 }
             }
         }
@@ -1078,15 +1072,61 @@ fn build_ahocorasick_paths(
     AhoCorasick::new(patterns).map(|x| (x, replace_with))
 }
 
+//fn build_ahocorasick_walks(
+//    transform: &FxHashMap<Node, Vec<OrientedNode>>,
+//    graph: &HashGraph,
+//    orig_node_lens: &FxHashMap<usize, usize>,
+//) -> Result<(AhoCorasick, Vec<Vec<u8>>), BuildError> {
+//    let mut patterns_replacements: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
+//
+//    panic!("not implemented");
+//
+//    let (patterns, replace_with): (Vec<Vec<u8>>, Vec<Vec<u8>>) = patterns_replacements.into_iter().unzip();
+//    AhoCorasick::new(patterns).map(|x| (x, replace_with))
+//}
+
+fn transform_path(
+    path: &[u8],
+    transform: &FxHashMap<Node, Vec<OrientedNode>>,
+    orig_node_lens: &FxHashMap<usize, usize>,
+) -> Vec<u8> {
+    let (ac, replace_with) = build_ahocorasick_paths(transform, orig_node_lens)
+        .expect("unable to build Aho-Corasick automaton for this transformation table");
+
+    let start = memchr(b',', &path).unwrap_or(path.len());
+
+    let mut prefix = vec![b','];
+    prefix.extend_from_slice(&path[..start]);
+    let mut t = ac
+        .try_replace_all_bytes(&prefix, &replace_with)
+        .expect("try_replace_all_bytes failed")[1..]
+        .to_vec();
+    t.append(&mut ac.try_replace_all_bytes(&path[start..], &replace_with)
+            .expect("try_replace_all_bytes failed"));
+    t
+}
+
 fn parse_and_transform_paths<W: io::Write, R: io::Read>(
-    data: R,
+    data: io::BufReader<R>,
     transform: &FxHashMap<Node, Vec<OrientedNode>>,
     orig_node_lens: &FxHashMap<usize, usize>,
     out: &mut io::BufWriter<W>,
-) -> Result<(), io::Error> {
-    let (ac, replace_with) = build_ahocorasick_paths(transform, orig_node_lens)
-        .expect("unable to build Aho-Corasick automaton for this transformation table");
-    ac.try_stream_replace_all(data, out, &replace_with)
+) -> Result<(), Box<dyn Error>> {
+    for line in ByteLineReader::new(data) {
+        if line[0] == b'P' {
+            let start = memchr(b'\t', &line[2..]).expect("invalid P line") + 3;
+            let end = memrchr(b'\t', &line).expect("invalid P line");
+            out.write(&line[..start])?;
+            out.write(&transform_path(
+                &line[start..end],
+                transform,
+                orig_node_lens,
+            ))?;
+            out.write(&line[end..])?;
+        }
+    }
+
+    Ok(())
 }
 
 fn parse_gfa_omit_paths<R: io::Read>(
@@ -1390,7 +1430,7 @@ fn main() -> Result<(), io::Error> {
     };
 
     if let Err(e) = parse_and_transform_paths(
-        reader,
+        io::BufReader::new(reader),
         &transform,
         &node_lens,
         &mut graph_out,
