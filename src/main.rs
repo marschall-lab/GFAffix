@@ -1085,11 +1085,12 @@ fn build_ahocorasick_paths(
 //    AhoCorasick::new(patterns).map(|x| (x, replace_with))
 //}
 
-fn transform_path(
+fn transform_path<W: io::Write>(
     path: &[u8],
     transform: &FxHashMap<Node, Vec<OrientedNode>>,
     orig_node_lens: &FxHashMap<usize, usize>,
-) -> Vec<u8> {
+    out: &mut io::BufWriter<W>
+) -> Result<(), io::Error>{
     let (ac, replace_with) = build_ahocorasick_paths(transform, orig_node_lens)
         .expect("unable to build Aho-Corasick automaton for this transformation table");
 
@@ -1097,13 +1098,13 @@ fn transform_path(
 
     let mut prefix = vec![b','];
     prefix.extend_from_slice(&path[..start]);
-    let mut t = ac
+    out.write(&ac
         .try_replace_all_bytes(&prefix, &replace_with)
         .expect("try_replace_all_bytes failed")[1..]
-        .to_vec();
-    t.append(&mut ac.try_replace_all_bytes(&path[start..], &replace_with)
-            .expect("try_replace_all_bytes failed"));
-    t
+        .to_vec())?;
+    ac.try_stream_replace_all(&path[start..], out, &replace_with)
+            .expect("try_replace_all_bytes failed");
+    Ok(())
 }
 
 fn parse_and_transform_paths<W: io::Write, R: io::Read>(
@@ -1117,11 +1118,12 @@ fn parse_and_transform_paths<W: io::Write, R: io::Read>(
             let start = memchr(b'\t', &line[2..]).expect("invalid P line") + 3;
             let end = memrchr(b'\t', &line).expect("invalid P line");
             out.write(&line[..start])?;
-            out.write(&transform_path(
+            transform_path(
                 &line[start..end],
                 transform,
                 orig_node_lens,
-            ))?;
+                out,
+            )?;
             out.write(&line[end..])?;
         }
     }
