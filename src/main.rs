@@ -703,67 +703,47 @@ fn find_and_collapse_walk_preserving_shared_affixes<'a>(
     let mut has_changed = true;
     while has_changed {
         has_changed = false;
-        let mut queue: Vec<Handle> = graph
-            .handles()
-            .chain(graph.handles().map(|v| v.flip()))
-            .collect();
-        while !queue.is_empty() {
-            let mut cur_affixes = find_walk_preserving_shared_affixes(graph, &del_subg, queue);
-            cur_affixes.sort_by_cached_key(|x| {
-                (-(x.sequence.len() as i64), *x.parents.iter().min().unwrap())
-            });
-            queue = Vec::new();
-            let mut cur_modified_nodes = FxHashSet::default();
-            for affix in cur_affixes.iter() {
-                // in each iteration, the set of deleted nodes can change and affect the
-                // subsequent iteration, so we need to check the status the node every time
-                if affix
-                    .shared_prefix_nodes
-                    .iter()
-                    .chain(affix.parents.iter())
-                    .any(|u| del_subg.node_deleted(u) || cur_modified_nodes.contains(&u.forward()))
-                {
-                    // push non-deleted parents back on queue
-                    queue.extend(affix.parents.iter().filter_map(|u| {
-                        if !del_subg.node_deleted(u) {
-                            Some(u.flip())
-                        } else {
-                            None
-                        }
-                    }));
-                } else {
-                    // 1 iteration is enough?
-                    //                    has_changed |= true;
-                    affixes.push(affix.clone());
+        let mut queue: VecDeque<Handle> = VecDeque::new();
+        queue.extend(graph.handles().chain(graph.handles().map(|v| v.flip())));
+        while let Some(v) = queue.pop_front() {
+            if !del_subg.node_deleted(&v) {
+                log::debug!("processing oriented node {}", v2str(&v));
+
+                // process node in forward direction
+                let cur_affixes =
+                    enumerate_walk_preserving_shared_affixes(graph, &del_subg, v).unwrap();
+                for affix in cur_affixes.iter() {
+                    has_changed |= true;
+                    // in each iteration, the set of deleted nodes can change and affect the
+                    // subsequent iteration, so we need to check the status the node every time
                     if affix
-                        .parents
+                        .shared_prefix_nodes
                         .iter()
-                        .chain(affix.shared_prefix_nodes.iter())
-                        .any(|&u| {
-                            event_tracker
-                                .modified_nodes
-                                .contains(&(u.unpack_number() as usize, graph.node_len(u)))
-                        })
+                        .chain(affix.parents.iter())
+                        .any(|u| del_subg.node_deleted(u))
                     {
-                        event_tracker.overlapping_events += 1
+                        // push non-deleted parents back on queue
+                        queue.extend(affix.parents.iter().filter(|u| !del_subg.node_deleted(u)));
+                    } else {
+                        affixes.push(affix.clone());
+                        if affix
+                            .parents
+                            .iter()
+                            .chain(affix.shared_prefix_nodes.iter())
+                            .any(|&u| {
+                                event_tracker
+                                    .modified_nodes
+                                    .contains(&(u.unpack_number() as usize, graph.node_len(u)))
+                            })
+                        {
+                            event_tracker.overlapping_events += 1
+                        }
+                        let shared_prefix_node =
+                            collapse(graph, affix, &mut del_subg, &mut event_tracker);
+
+                        queue.push_back(shared_prefix_node);
+                        queue.push_back(shared_prefix_node.flip());
                     }
-                    let shared_prefix_node =
-                        collapse(graph, affix, &mut del_subg, &mut event_tracker);
-                    cur_modified_nodes.extend(affix.parents.iter().filter_map(|u| {
-                        if !del_subg.node_deleted(u) {
-                            Some(u.forward())
-                        } else {
-                            None
-                        }
-                    }));
-                    cur_modified_nodes.extend(affix.shared_prefix_nodes.iter().filter_map(|u| {
-                        if !del_subg.node_deleted(u) {
-                            Some(u.forward())
-                        } else {
-                            None
-                        }
-                    }));
-                    queue.extend(find_affected_nodes(graph, &del_subg, shared_prefix_node));
                 }
             }
         }
