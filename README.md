@@ -37,21 +37,21 @@ mamba install -c conda-forge -c bioconda gfaffix
 #### Linux x86\_64
 
 ```
-wget --no-check-certificate -c https://github.com/marschall-lab/GFAffix/releases/download/0.2.0/GFAffix-0.2.0_linux_x86_64.tar.gz 
-tar -xzvf GFAffix-0.2.0_linux_x86_64.tar.gz 
+wget --no-check-certificate -c https://github.com/marschall-lab/GFAffix/releases/download/0.2.1/GFAffix-0.2.1_linux_x86_64.tar.gz 
+tar -xzvf GFAffix-0.2.1_linux_x86_64.tar.gz 
 
 # you are ready to go! 
-./GFAffix-0.2.0_linux_x86_64/gfaffix
+./GFAffix-0.2.1_linux_x86_64/gfaffix
 ```
 
 #### MacOS X arm64
 
 ```
-wget --no-check-certificate -c https://github.com/marschall-lab/GFAffix/releases/download/0.2.0/GFAffix-0.2.0_macos_x_arm64.tar.gz 
-tar -xzvf GFAffix-0.2.0_macos_x_arm64.tar.gz 
+wget --no-check-certificate -c https://github.com/marschall-lab/GFAffix/releases/download/0.2.1/GFAffix-0.2.1_macos_x_arm64.tar.gz 
+tar -xzvf GFAffix-0.2.1_macos_x_arm64.tar.gz 
 
 # you are ready to go! 
-./GFAffix-0.2.0_macos_x_arm64/gfaffix
+./GFAffix-0.2.1_macos_x_arm64/gfaffix
 ```
 
 ### From repository
