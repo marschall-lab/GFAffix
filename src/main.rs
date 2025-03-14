@@ -712,8 +712,7 @@ fn find_and_collapse_walk_preserving_shared_affixes<'a>(
                 // process node in forward direction
                 let cur_affixes =
                     enumerate_walk_preserving_shared_affixes(graph, &del_subg, v).unwrap();
-                for affix in cur_affixes.iter() {
-                    has_changed |= true;
+                for mut affix in cur_affixes.into_iter() {
                     // in each iteration, the set of deleted nodes can change and affect the
                     // subsequent iteration, so we need to check the status the node every time
                     if affix
@@ -725,6 +724,20 @@ fn find_and_collapse_walk_preserving_shared_affixes<'a>(
                         // push non-deleted parents back on queue
                         queue.extend(affix.parents.iter().filter(|u| !del_subg.node_deleted(u)));
                     } else {
+                        let mut cur_dont_collapse_nodes : Vec<usize> = affix.shared_prefix_nodes.iter().enumerate().filter_map(|(i, v)| if event_tracker.dont_collapse_nodes.contains(&(v.unpack_number() as usize, graph.node_len(*v))) {
+                            Some(i)
+                        } else {
+                            None
+                        }).collect();
+                        if cur_dont_collapse_nodes.len() >= 2 {
+                            while cur_dont_collapse_nodes.len() > 1 {
+                                affix.shared_prefix_nodes.swap_remove(cur_dont_collapse_nodes.pop().unwrap());
+                            }
+                            if affix.shared_prefix_nodes.len() < 2 {
+                                continue
+                            }
+                        }
+                        has_changed |= true;
                         affixes.push(affix.clone());
                         if affix
                             .parents
@@ -739,7 +752,7 @@ fn find_and_collapse_walk_preserving_shared_affixes<'a>(
                             event_tracker.overlapping_events += 1
                         }
                         let shared_prefix_node =
-                            collapse(graph, affix, &mut del_subg, &mut event_tracker);
+                            collapse(graph, &affix, &mut del_subg, &mut event_tracker);
 
                         queue.push_back(shared_prefix_node);
                         queue.push_back(shared_prefix_node.flip());
@@ -1241,15 +1254,15 @@ fn main() -> Result<(), io::Error> {
         }
     }
 
-    if !event_tracker.dont_collapse_nodes.is_empty() {
-        log::info!("de-collapse no-collapse handles and update transformation table");
-        event_tracker.decollapse(&mut graph, &mut del_subg);
-    }
+//    if !event_tracker.dont_collapse_nodes.is_empty() {
+//        log::info!("de-collapse no-collapse handles and update transformation table");
+//        event_tracker.decollapse(&mut graph, &mut del_subg);
+//    }
 
     // a blunt-end collapse is a non-symmetric operation, which cannot be reversed easily,
     // therefore we do this after decollapse (and make sure that we don't collapse reference nodes)
-    log::info!("identifying walk-preserving blunt ends");
-    find_and_collapse_blunt_ends(&mut graph, &mut del_subg, &mut event_tracker);
+//    log::info!("identifying walk-preserving blunt ends");
+//    find_and_collapse_blunt_ends(&mut graph, &mut del_subg, &mut event_tracker);
 
     log::info!("expand transformation table");
     let transform = event_tracker.get_expanded_transformation();
