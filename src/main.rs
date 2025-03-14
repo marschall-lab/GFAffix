@@ -1261,8 +1261,8 @@ fn main() -> Result<(), io::Error> {
 
     // a blunt-end collapse is a non-symmetric operation, which cannot be reversed easily,
     // therefore we do this after decollapse (and make sure that we don't collapse reference nodes)
-//    log::info!("identifying walk-preserving blunt ends");
-//    find_and_collapse_blunt_ends(&mut graph, &mut del_subg, &mut event_tracker);
+    log::info!("identifying walk-preserving blunt ends");
+    find_and_collapse_blunt_ends(&mut graph, &mut del_subg, &mut event_tracker);
 
     log::info!("expand transformation table");
     let transform = event_tracker.get_expanded_transformation();
